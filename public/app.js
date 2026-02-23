@@ -791,7 +791,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateEditorVisibility();
             markdownContent.innerHTML = `
                 <div class="welcome-screen">
-                    <h1>Markdown Viewer</h1>
+                    <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/favicon.png" alt="" width="28" height="28" style="border-radius: 5px;"> Sublime Markdown</h1>
                     <p>Selecciona un archivo <code>.md</code> del panel izquierdo para comenzar.</p>
                 </div>
             `;
