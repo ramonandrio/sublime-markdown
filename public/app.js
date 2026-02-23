@@ -871,6 +871,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===================================
+    // FILE WATCHER (Polling para cambios externos)
+    // ===================================
+
+    setInterval(async () => {
+        for (const tab of openTabs) {
+            if (!tab.isLocal || !tab.handle) continue;
+
+            try {
+                const file = await tab.handle.getFile();
+                const diskContent = await file.text();
+
+                // Solo actualizar si el disco cambió respecto a lo guardado
+                if (diskContent === tab.savedContent) continue;
+
+                // El archivo cambió en disco
+                if (tab.dirty) {
+                    // Tiene edits locales sin guardar — no sobreescribir automáticamente
+                    // Solo marcar que hay conflicto (se resuelve al guardar)
+                    continue;
+                }
+
+                // Sin edits locales: actualizar silenciosamente
+                tab.rawContent = diskContent;
+                tab.savedContent = diskContent;
+                const rawHtml = marked.parse(diskContent);
+                tab.content = DOMPurify.sanitize(rawHtml);
+
+                if (tab.id === activeTabId) {
+                    markdownContent.innerHTML = tab.content;
+                    markdownEditor.value = tab.rawContent;
+                    initHistory(tab.id, tab.rawContent);
+                    if (isTocOpen) generateTOC();
+                }
+
+                renderTabs();
+                saveWorkspaceState();
+            } catch (e) {
+                // Ignorar errores de lectura (archivo eliminado, permisos, etc.)
+            }
+        }
+    }, 3000);
+
+    // ===================================
     // GUARDADO
     // ===================================
 
