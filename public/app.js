@@ -52,6 +52,82 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ===================================
+    // PERSISTENCIA DE WORKSPACE (IndexedDB)
+    // ===================================
+
+    const WorkspaceDB = (() => {
+        const DB_NAME = 'MarkdownViewerDB';
+        const STORE_NAME = 'workspace';
+
+        function getDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => resolve(request.result);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+            });
+        }
+
+        async function save(state) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                const request = store.put(state, 'current_state');
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function load() {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const request = store.get('current_state');
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        return { save, load, getDB };
+    })();
+
+    async function saveWorkspaceState() {
+        if (!currentGitHubRepo && !currentLocalFolderHandle) return;
+
+        const state = {
+            type: currentGitHubRepo ? 'github' : 'local',
+            currentGitHubRepo,
+            localFolderHandle: currentLocalFolderHandle,
+            activeTabId,
+            openTabs: openTabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                path: t.path,
+                handle: t.handle,
+                isLocal: t.isLocal,
+                isGitHub: t.isGitHub,
+                githubMeta: t.githubMeta,
+                content: t.content,
+                rawContent: t.rawContent,
+                dirty: t.dirty
+            }))
+        };
+
+        try {
+            await WorkspaceDB.save(state);
+        } catch (err) {
+            console.error("Error guardando workspace en IndexedDB:", err);
+        }
+    }
+
+    // ===================================
     // FLUJO DE INICIO
     // ===================================
 
@@ -1144,82 +1220,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (targetTop < currentScroll || targetTop > currentScroll + editorHeight - lineHeight * 2) {
             markdownEditor.scrollTop = Math.max(0, targetTop - lineHeight * 2);
-        }
-    }
-
-    // ===================================
-    // PERSISTENCIA DE WORKSPACE (IndexedDB)
-    // ===================================
-
-    const WorkspaceDB = (() => {
-        const DB_NAME = 'MarkdownViewerDB';
-        const STORE_NAME = 'workspace';
-
-        function getDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, 1);
-                request.onerror = () => reject(request.error);
-                request.onsuccess = () => resolve(request.result);
-                request.onupgradeneeded = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains(STORE_NAME)) {
-                        db.createObjectStore(STORE_NAME);
-                    }
-                };
-            });
-        }
-
-        async function save(state) {
-            const db = await getDB();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(STORE_NAME, 'readwrite');
-                const store = tx.objectStore(STORE_NAME);
-                const request = store.put(state, 'current_state');
-                request.onsuccess = () => resolve();
-                request.onerror = () => reject(request.error);
-            });
-        }
-
-        async function load() {
-            const db = await getDB();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(STORE_NAME, 'readonly');
-                const store = tx.objectStore(STORE_NAME);
-                const request = store.get('current_state');
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = () => reject(request.error);
-            });
-        }
-
-        return { save, load, getDB };
-    })();
-
-    async function saveWorkspaceState() {
-        if (!currentGitHubRepo && !currentLocalFolderHandle) return;
-
-        const state = {
-            type: currentGitHubRepo ? 'github' : 'local',
-            currentGitHubRepo,
-            localFolderHandle: currentLocalFolderHandle,
-            activeTabId,
-            openTabs: openTabs.map(t => ({
-                id: t.id,
-                name: t.name,
-                path: t.path,
-                handle: t.handle,
-                isLocal: t.isLocal,
-                isGitHub: t.isGitHub,
-                githubMeta: t.githubMeta,
-                content: t.content,
-                rawContent: t.rawContent,
-                dirty: t.dirty
-            }))
-        };
-
-        try {
-            await WorkspaceDB.save(state);
-        } catch (err) {
-            console.error("Error guardando workspace en IndexedDB:", err);
         }
     }
 
