@@ -778,6 +778,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 markdownContent.innerHTML = '<div class="loading-state">Cargando Markdown...</div>';
             }
             markdownEditor.value = activeTab.rawContent !== null ? activeTab.rawContent : '';
+            // Ensure undo history is initialized for this tab
+            const h = tabHistory[fileId];
+            if (!h || h.undoStack.length === 0) {
+                initHistory(fileId, markdownEditor.value);
+            }
         } else {
             editorToolbar.style.display = 'none';
             isEditorOpen = false;
