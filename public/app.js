@@ -35,6 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentGitHubRepo = null;
     let allRepos = [];
 
+    // Undo/Redo: historial por tab { tabId: { undoStack: [], redoStack: [] } }
+    const tabHistory = {};
+    let historyTimer = null;
+
     // Configurar Marked.js
     marked.setOptions({
         highlight: function (code, lang) {
@@ -261,15 +265,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Guardar
     saveFileBtn.addEventListener('click', () => saveActiveFile());
 
-    // Atajo ⌘+S / Ctrl+S
+    // Atajos de teclado
     document.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 's') {
             e.preventDefault();
             saveActiveFile();
         }
+        // Undo: ⌘+Z / Ctrl+Z
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+            if (document.activeElement === markdownEditor) {
+                e.preventDefault();
+                performUndo();
+            }
+        }
+        // Redo: ⌘+Shift+Z / Ctrl+Shift+Z
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+            if (document.activeElement === markdownEditor) {
+                e.preventDefault();
+                performRedo();
+            }
+        }
     });
 
-    // Editor Input: Live preview
+    // Editor Input: Live preview + historial
     markdownEditor.addEventListener('input', () => {
         const activeTab = openTabs.find(t => t.id === activeTabId);
         if (!activeTab) return;
@@ -283,7 +301,91 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isTocOpen) generateTOC();
         renderTabs();
+
+        // Guardar snapshot en historial (debounced 500ms)
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(() => pushHistory(activeTabId), 500);
     });
+
+    // --- UNDO / REDO ---
+
+    function ensureHistory(tabId) {
+        if (!tabHistory[tabId]) {
+            tabHistory[tabId] = { undoStack: [], redoStack: [] };
+        }
+        return tabHistory[tabId];
+    }
+
+    function pushHistory(tabId) {
+        const h = ensureHistory(tabId);
+        const current = markdownEditor.value;
+        const cursor = markdownEditor.selectionStart;
+        // No guardar si es igual al último snapshot
+        if (h.undoStack.length > 0 && h.undoStack[h.undoStack.length - 1].text === current) return;
+        h.undoStack.push({ text: current, cursor });
+        h.redoStack = []; // Limpiar redo al editar
+        // Limitar a 100 snapshots
+        if (h.undoStack.length > 100) h.undoStack.shift();
+    }
+
+    function initHistory(tabId, text) {
+        const h = ensureHistory(tabId);
+        h.undoStack = [{ text, cursor: 0 }];
+        h.redoStack = [];
+    }
+
+    function performUndo() {
+        if (!activeTabId) return;
+        const h = ensureHistory(activeTabId);
+
+        // Guardar estado actual en redo
+        const current = markdownEditor.value;
+        const cursor = markdownEditor.selectionStart;
+
+        if (h.undoStack.length === 0) return;
+
+        // Si el último undo es igual al actual, necesitamos el anterior
+        let snapshot = h.undoStack[h.undoStack.length - 1];
+        if (snapshot.text === current && h.undoStack.length > 1) {
+            h.redoStack.push(h.undoStack.pop());
+            snapshot = h.undoStack[h.undoStack.length - 1];
+        } else if (snapshot.text === current) {
+            return; // No hay más undo
+        } else {
+            // El estado actual no está guardado aún, guardarlo en redo
+            h.redoStack.push({ text: current, cursor });
+        }
+
+        applySnapshot(snapshot);
+    }
+
+    function performRedo() {
+        if (!activeTabId) return;
+        const h = ensureHistory(activeTabId);
+        if (h.redoStack.length === 0) return;
+
+        // Guardar actual en undo
+        pushHistory(activeTabId);
+
+        const snapshot = h.redoStack.pop();
+        applySnapshot(snapshot);
+    }
+
+    function applySnapshot(snapshot) {
+        markdownEditor.value = snapshot.text;
+        markdownEditor.setSelectionRange(snapshot.cursor, snapshot.cursor);
+
+        const activeTab = openTabs.find(t => t.id === activeTabId);
+        if (activeTab) {
+            activeTab.rawContent = snapshot.text;
+            activeTab.dirty = true;
+            const rawHtml = marked.parse(activeTab.rawContent);
+            activeTab.content = DOMPurify.sanitize(rawHtml);
+            markdownContent.innerHTML = activeTab.content;
+            if (isTocOpen) generateTOC();
+            renderTabs();
+        }
+    }
 
     // ===================================
     // CARPETA LOCAL (File System Access API)
@@ -558,6 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
                 markdownEditor.value = tabData.rawContent;
+                initHistory(tabData.id, tabData.rawContent);
                 if (isTocOpen) generateTOC();
             }
 
