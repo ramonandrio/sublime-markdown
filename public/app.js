@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isEditorOpen = false;
     let isTocOpen = false;
     let currentGitHubRepo = null;
+    let currentLocalFolderHandle = null;
     let allRepos = [];
 
     // Undo/Redo: historial por tab { tabId: { undoStack: [], redoStack: [] } }
@@ -54,7 +55,74 @@ document.addEventListener('DOMContentLoaded', () => {
     // FLUJO DE INICIO
     // ===================================
 
-    showWelcomeScreen();
+    initApp();
+
+    async function initApp() {
+        const state = await WorkspaceDB.load();
+        if (state && (state.currentGitHubRepo || state.localFolderHandle)) {
+            // Restore state
+            currentGitHubRepo = state.currentGitHubRepo;
+            currentLocalFolderHandle = state.localFolderHandle;
+            openTabs = state.openTabs || [];
+            activeTabId = state.activeTabId;
+
+            showApp();
+
+            // Render Sidebar
+            if (currentGitHubRepo) {
+                fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
+                try {
+                    const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+                    fileTreeContainer.innerHTML = '';
+                    fileTreeContainer.appendChild(renderTreeItem(treeData, true));
+                } catch (err) {
+                    fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
+                }
+            } else if (currentLocalFolderHandle) {
+                const hasPerm = await verifyPermission(currentLocalFolderHandle, false);
+                if (hasPerm) {
+                    await renderLocalFolder(currentLocalFolderHandle);
+                } else {
+                    fileTreeContainer.innerHTML = `
+                        <div style="padding: 20px; text-align: center;">
+                            <p style="margin-bottom: 12px; font-size: 0.85rem; color: var(--text-muted);">
+                                Para restaurar la carpeta local, haz clic abajo.
+                            </p>
+                            <button id="restoreLocalBtn" class="action-btn" style="background: var(--bg-hover); padding: 6px 16px; margin: 0 auto; border: 1px solid var(--border-color);">
+                                Restaurar Sesión
+                            </button>
+                        </div>
+                    `;
+                    document.getElementById('restoreLocalBtn').addEventListener('click', async () => {
+                        const verified = await verifyPermission(currentLocalFolderHandle, true);
+                        if (verified) {
+                            await renderLocalFolder(currentLocalFolderHandle);
+                        }
+                    });
+                }
+            }
+
+            // Restore Main Area
+            if (activeTabId) {
+                setActiveTab(activeTabId);
+            } else {
+                renderTabs();
+            }
+        } else {
+            showWelcomeScreen();
+        }
+    }
+
+    async function verifyPermission(fileHandle, request = false) {
+        const options = { mode: 'readwrite' };
+        if ((await fileHandle.queryPermission(options)) === 'granted') {
+            return true;
+        }
+        if (request && (await fileHandle.requestPermission(options)) === 'granted') {
+            return true;
+        }
+        return false;
+    }
 
     function showWelcomeScreen() {
         welcomeScreen.style.display = 'flex';
@@ -76,8 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
             const dirHandle = await window.showDirectoryPicker();
+            currentGitHubRepo = null;
+            currentLocalFolderHandle = dirHandle;
             showApp();
             await renderLocalFolder(dirHandle);
+            saveWorkspaceState();
         } catch (err) {
             if (err.name !== 'AbortError') {
                 alert('Error al abrir carpeta: ' + err.message);
@@ -191,6 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
             repo: repo.name,
             fullName: repo.full_name
         };
+        currentLocalFolderHandle = null;
 
         showApp();
         fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
@@ -200,6 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fileTreeContainer.innerHTML = '';
             const rootEl = renderTreeItem(treeData, true);
             fileTreeContainer.appendChild(rootEl);
+            saveWorkspaceState();
         } catch (err) {
             fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
         }
@@ -216,7 +289,9 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const dirHandle = await window.showDirectoryPicker();
                 currentGitHubRepo = null;
+                currentLocalFolderHandle = dirHandle;
                 await renderLocalFolder(dirHandle);
+                saveWorkspaceState();
             } catch (err) {
                 if (err.name !== 'AbortError') {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error al abrir carpeta: ${err.message}</div>`;
@@ -237,8 +312,10 @@ document.addEventListener('DOMContentLoaded', () => {
             openTabs = [];
             activeTabId = null;
             currentGitHubRepo = null;
+            currentLocalFolderHandle = null;
             renderTabs();
             showWelcomeScreen();
+            saveWorkspaceState();
         });
     }
 
@@ -304,7 +381,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Guardar snapshot en historial (debounced 500ms)
         clearTimeout(historyTimer);
-        historyTimer = setTimeout(() => pushHistory(activeTabId), 500);
+        historyTimer = setTimeout(() => {
+            pushHistory(activeTabId);
+            saveWorkspaceState();
+        }, 500);
     });
 
     // --- UNDO / REDO ---
@@ -586,6 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setActiveTab(fileId) {
         activeTabId = fileId;
         renderTabs();
+        saveWorkspaceState();
 
         document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
         if (fileId) {
@@ -635,6 +716,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 renderTabs();
+                saveWorkspaceState();
             }
         }
     }
@@ -717,6 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             activeTab.dirty = false;
             renderTabs();
+            saveWorkspaceState();
 
             saveFileBtn.innerHTML = `
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 4px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
@@ -1061,6 +1144,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (targetTop < currentScroll || targetTop > currentScroll + editorHeight - lineHeight * 2) {
             markdownEditor.scrollTop = Math.max(0, targetTop - lineHeight * 2);
+        }
+    }
+
+    // ===================================
+    // PERSISTENCIA DE WORKSPACE (IndexedDB)
+    // ===================================
+
+    const WorkspaceDB = (() => {
+        const DB_NAME = 'MarkdownViewerDB';
+        const STORE_NAME = 'workspace';
+
+        function getDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => resolve(request.result);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+            });
+        }
+
+        async function save(state) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                const store = tx.objectStore(STORE_NAME);
+                const request = store.put(state, 'current_state');
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function load() {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(STORE_NAME, 'readonly');
+                const store = tx.objectStore(STORE_NAME);
+                const request = store.get('current_state');
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        return { save, load, getDB };
+    })();
+
+    async function saveWorkspaceState() {
+        if (!currentGitHubRepo && !currentLocalFolderHandle) return;
+
+        const state = {
+            type: currentGitHubRepo ? 'github' : 'local',
+            currentGitHubRepo,
+            localFolderHandle: currentLocalFolderHandle,
+            activeTabId,
+            openTabs: openTabs.map(t => ({
+                id: t.id,
+                name: t.name,
+                path: t.path,
+                handle: t.handle,
+                isLocal: t.isLocal,
+                isGitHub: t.isGitHub,
+                githubMeta: t.githubMeta,
+                content: t.content,
+                rawContent: t.rawContent,
+                dirty: t.dirty
+            }))
+        };
+
+        try {
+            await WorkspaceDB.save(state);
+        } catch (err) {
+            console.error("Error guardando workspace en IndexedDB:", err);
         }
     }
 
