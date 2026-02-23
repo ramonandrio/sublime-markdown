@@ -544,6 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             markdownContent.innerHTML = activeTab.content;
             if (isTocOpen) generateTOC();
             renderTabs();
+            saveWorkspaceState();
         }
     }
 
