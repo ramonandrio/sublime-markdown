@@ -876,26 +876,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setInterval(async () => {
         for (const tab of openTabs) {
-            if (!tab.isLocal || !tab.handle) continue;
-
             try {
-                const file = await tab.handle.getFile();
-                const diskContent = await file.text();
+                let newContent = null;
 
-                // Solo actualizar si el disco cambió respecto a lo guardado
-                if (diskContent === tab.savedContent) continue;
+                if (tab.isLocal && tab.handle) {
+                    const file = await tab.handle.getFile();
+                    const diskContent = await file.text();
+                    if (diskContent === tab.savedContent) continue;
+                    newContent = diskContent;
 
-                // El archivo cambió en disco
-                if (tab.dirty) {
-                    // Tiene edits locales sin guardar — no sobreescribir automáticamente
-                    // Solo marcar que hay conflicto (se resuelve al guardar)
+                } else if (tab.isGitHub && tab.githubMeta) {
+                    const data = await GitHubAPI.getFileContent(
+                        tab.githubMeta.owner,
+                        tab.githubMeta.repo,
+                        tab.path
+                    );
+                    if (data.sha === tab.githubMeta.sha) continue;
+                    newContent = data.content;
+                    tab.githubMeta.sha = data.sha;
+
+                } else {
                     continue;
                 }
 
-                // Sin edits locales: actualizar silenciosamente
-                tab.rawContent = diskContent;
-                tab.savedContent = diskContent;
-                const rawHtml = marked.parse(diskContent);
+                // El archivo cambió externamente
+                if (tab.dirty) continue; // No sobreescribir edits locales
+
+                // Actualizar silenciosamente
+                tab.rawContent = newContent;
+                tab.savedContent = newContent;
+                const rawHtml = marked.parse(newContent);
                 tab.content = DOMPurify.sanitize(rawHtml);
 
                 if (tab.id === activeTabId) {
@@ -908,10 +918,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderTabs();
                 saveWorkspaceState();
             } catch (e) {
-                // Ignorar errores de lectura (archivo eliminado, permisos, etc.)
+                // Ignorar errores de lectura
             }
         }
-    }, 3000);
+    }, 5000);
 
     // ===================================
     // GUARDADO
