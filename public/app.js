@@ -568,6 +568,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tabsContainer.appendChild(tabEl);
         });
+
+        updateSaveButtonState();
+    }
+
+    function updateSaveButtonState() {
+        const activeTab = openTabs.find(t => t.id === activeTabId);
+        if (activeTab && activeTab.dirty) {
+            saveFileBtn.classList.add('btn-dirty');
+            saveFileBtn.title = 'Hay cambios sin guardar (⌘+S)';
+        } else {
+            saveFileBtn.classList.remove('btn-dirty');
+            saveFileBtn.title = 'Guardar (⌘+S)';
+        }
     }
 
     function setActiveTab(fileId) {
