@@ -118,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 githubMeta: t.githubMeta,
                 content: t.content,
                 rawContent: t.rawContent,
+                savedContent: t.savedContent,
                 dirty: t.dirty
             }))
         };
@@ -449,7 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!activeTab) return;
 
         activeTab.rawContent = markdownEditor.value;
-        activeTab.dirty = true;
+        activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
 
         const rawHtml = marked.parse(activeTab.rawContent);
         activeTab.content = DOMPurify.sanitize(rawHtml);
@@ -537,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const activeTab = openTabs.find(t => t.id === activeTabId);
         if (activeTab) {
             activeTab.rawContent = snapshot.text;
-            activeTab.dirty = true;
+            activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
             const rawHtml = marked.parse(activeTab.rawContent);
             activeTab.content = DOMPurify.sanitize(rawHtml);
             markdownContent.innerHTML = activeTab.content;
@@ -704,6 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 githubMeta: currentGitHubRepo ? { ...currentGitHubRepo, sha: item.sha } : null,
                 content: null,
                 rawContent: null,
+                savedContent: null,
                 dirty: false
             };
             openTabs.push(existingTab);
@@ -840,6 +842,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             tabData.rawContent = markdownText;
+            tabData.savedContent = markdownText;
             const rawHtml = marked.parse(markdownText);
             tabData.content = DOMPurify.sanitize(rawHtml);
 
@@ -889,6 +892,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             activeTab.dirty = false;
+            activeTab.savedContent = activeTab.rawContent;
             renderTabs();
             saveWorkspaceState();
 
