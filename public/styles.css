@@ -1,0 +1,792 @@
+:root {
+    /* Paleta Light (Inspirada en GitHub Light / Notion) */
+    --bg-dark: #ffffff;
+    --bg-darker: #f6f8fa;
+    --bg-selection: #0969da;
+    --bg-hover: #eaeef2;
+
+    --text-primary: #1f2328;
+    --text-muted: #656d76;
+    --text-accent: #0969da;
+
+    --border-color: #d0d7de;
+
+    --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', Courier, monospace;
+
+    --radius-sm: 4px;
+    --radius-md: 8px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    height: 100vh;
+    overflow: hidden;
+    line-height: 1.6;
+}
+
+/* Layout Principal */
+.app-container {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+}
+
+/* Scrollbars Personalizadas (Webkit) */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border: 2px solid var(--bg-dark);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* --- PANEL LATERAL (Navegador) --- */
+.sidebar {
+    width: 300px;
+    min-width: 0;
+    max-width: 400px;
+    background-color: var(--bg-darker);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.2s ease, min-width 0.2s ease, padding 0.2s ease;
+}
+
+.sidebar.collapsed {
+    width: 0;
+    min-width: 0;
+    border-right: none;
+}
+
+.sidebar-toggle {
+    background: var(--bg-darker);
+    border: none;
+    border-right: 1px solid var(--border-color);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+.sidebar-toggle:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.sidebar-toggle svg {
+    transition: transform 0.2s ease;
+}
+
+.sidebar-toggle.collapsed svg {
+    transform: rotate(180deg);
+}
+
+.sidebar-header {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-header h2 {
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.action-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    padding: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.action-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.file-tree {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 0 10px 20px 0;
+    user-select: none;
+}
+
+/* Elementos del Árbol */
+.tree-item-container {
+    display: flex;
+    flex-direction: column;
+}
+
+.tree-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px 6px 20px;
+    cursor: pointer;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    transition: background-color 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.tree-item:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tree-item.active {
+    background-color: var(--bg-selection);
+    color: #ffffff;
+    font-weight: 500;
+}
+
+.tree-item.empty {
+    padding-left: 45px;
+    font-style: italic;
+    opacity: 0.5;
+    cursor: default;
+}
+
+.tree-item.empty:hover {
+    background-color: transparent;
+}
+
+.children-container {
+    padding-left: 15px;
+    /* Indentación visual de carpetas */
+}
+
+/* Iconos del Árbol */
+.icon-wrapper {
+    display: flex;
+    align-items: center;
+    width: 24px;
+    margin-right: 6px;
+    justify-content: flex-end;
+}
+
+.item-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chevron {
+    font-size: 0.6rem;
+    margin-right: 6px;
+    opacity: 0.7;
+    transition: transform 0.2s;
+    display: inline-block;
+}
+
+/* Iconos pseudo-elementos (simples colores por ahora) */
+.folder-icon::before {
+    content: '📁';
+    font-size: 1rem;
+    filter: grayscale(0.5);
+}
+
+.active .folder-icon::before {
+    filter: none;
+}
+
+.file-icon::before {
+    content: '📄';
+    font-size: 0.9rem;
+    filter: grayscale(0.8);
+}
+
+.active .file-icon::before {
+    filter: none;
+}
+
+/* --- PANEL PRINCIPAL (Visor MD) --- */
+.content-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-dark);
+    min-width: 0;
+    /* Para el truncado de texto */
+}
+
+/* Pestañas (Tabs) Estilo Sublime */
+.content-header {
+    background-color: var(--bg-darker);
+    display: flex;
+}
+
+.tabs {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.tabs::-webkit-scrollbar {
+    height: 4px;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    background-color: var(--bg-darker);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    min-width: 120px;
+    max-width: 200px;
+    border-right: 1px solid var(--border-color);
+    border-top: 2px solid transparent;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+    display: none;
+    /* Oculta por defecto hasta cargar archivo */
+}
+
+.tab:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tab.active {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-weight: 500;
+    border-top: 2px solid var(--text-accent);
+}
+
+.tab .filename {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0 8px;
+}
+
+.tab .close-tab {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tab .close-tab:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+}
+
+/* --- EDITOR PANEL --- */
+#markdownEditor {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    background-color: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 40px;
+    border: none;
+    resize: none;
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Contenedor Markdown Previsualización */
+.markdown-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 40px;
+    display: flex;
+    justify-content: center;
+}
+
+.markdown-body {
+    width: 100%;
+    max-width: 850px;
+    color: var(--text-primary);
+    /* Texto principal */
+}
+
+.welcome-screen {
+    text-align: center;
+    margin-top: 20vh;
+    color: var(--text-muted);
+}
+
+.welcome-screen h1 {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+/* --- ESTILOS DE RENDERIZADO MARKDOWN (Typographic Polish) --- */
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--text-primary);
+}
+
+.markdown-body h1 {
+    font-size: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.markdown-body h2 {
+    font-size: 1.5em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.markdown-body p,
+.markdown-body blockquote,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body dl,
+.markdown-body table,
+.markdown-body pre,
+.markdown-body details {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 1rem;
+}
+
+/* Enlaces */
+.markdown-body a {
+    color: var(--text-accent);
+    text-decoration: none;
+}
+
+.markdown-body a:hover {
+    text-decoration: underline;
+}
+
+/* Listas */
+.markdown-body ul,
+.markdown-body ol {
+    padding-left: 2em;
+}
+
+.markdown-body li {
+    margin-bottom: 0.25em;
+}
+
+/* Blockquotes */
+.markdown-body blockquote {
+    padding: 0 1em;
+    color: var(--text-muted);
+    border-left: 0.25em solid var(--border-color);
+}
+
+/* Tablas */
+.markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+    padding: 6px 13px;
+    border: 1px solid var(--border-color);
+}
+
+.markdown-body table tr:nth-child(2n) {
+    background-color: var(--bg-hover);
+}
+
+/* Código en línea */
+.markdown-body code {
+    padding: 0.2em 0.4em;
+    margin: 0;
+    font-size: 85%;
+    font-family: var(--font-mono);
+    background-color: rgba(175, 184, 193, 0.2);
+    border-radius: var(--radius-sm);
+}
+
+/* Bloques de código (Pre tag) */
+.markdown-body pre {
+    padding: 16px;
+    overflow: auto;
+    font-size: 85%;
+    line-height: 1.45;
+    background-color: #f6f8fa !important;
+    /* Base GitHub Light */
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.markdown-body pre code {
+    display: block;
+    padding: 0;
+    margin: 0;
+    font-size: 100%;
+    background-color: transparent;
+    border-radius: 0;
+}
+
+/* Utilidades / Estados */
+.loading-state,
+.error-state {
+    padding: 20px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.error-state {
+    color: #e06c75;
+    /* Acento rojo */
+}
+
+/* --- PANEL TOC (Tabla de Contenidos) --- */
+.toc-panel {
+    width: 240px;
+    min-width: 200px;
+    background-color: var(--bg-darker);
+    border-left: 1px solid var(--border-color);
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.toc-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.toc-header h3 {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.toc-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.toc-empty {
+    padding: 16px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+.toc-item {
+    display: block;
+    padding: 5px 16px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.toc-item:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.toc-item.active {
+    color: var(--text-accent);
+    border-left-color: var(--text-accent);
+    font-weight: 500;
+}
+
+/* Indentación por nivel de heading */
+.toc-item[data-level="1"] {
+    padding-left: 16px;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.toc-item[data-level="2"] {
+    padding-left: 28px;
+}
+
+.toc-item[data-level="3"] {
+    padding-left: 40px;
+    font-size: 0.78rem;
+}
+
+.toc-item[data-level="4"] {
+    padding-left: 52px;
+    font-size: 0.75rem;
+}
+
+.toc-item[data-level="5"] {
+    padding-left: 64px;
+    font-size: 0.75rem;
+}
+
+.toc-item[data-level="6"] {
+    padding-left: 76px;
+    font-size: 0.75rem;
+}
+
+/* Dirty dot indicator */
+.dirty-dot {
+    color: var(--text-accent);
+    margin-left: 4px;
+    font-size: 0.7rem;
+}
+
+/* --- PANTALLA DE BIENVENIDA --- */
+.welcome-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    background: linear-gradient(135deg, #f0f4ff 0%, #fafbff 50%, #f5f0ff 100%);
+}
+
+.welcome-card {
+    background: white;
+    border-radius: 16px;
+    padding: 48px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 4px rgba(0, 0, 0, 0.04);
+    max-width: 500px;
+    width: 90%;
+    text-align: center;
+}
+
+.welcome-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.welcome-subtitle {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 32px;
+}
+
+.source-options {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 0;
+}
+
+.source-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px;
+    border: 1.5px solid var(--border-color);
+    border-radius: 12px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.source-btn:hover {
+    border-color: var(--text-accent);
+    background: #f0f6ff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(9, 105, 218, 0.12);
+}
+
+.source-icon {
+    color: var(--text-muted);
+    transition: color 0.2s;
+}
+
+.source-btn:hover .source-icon {
+    color: var(--text-accent);
+}
+
+.source-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.source-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* GitHub Repo Selector */
+.github-selector {
+    margin-top: 24px;
+    text-align: left;
+}
+
+.github-user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    background: var(--bg-darker);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    font-size: 0.85rem;
+}
+
+.github-user-info img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+}
+
+.repo-search {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1.5px solid var(--border-color);
+    border-radius: 8px;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    outline: none;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+}
+
+.repo-search:focus {
+    border-color: var(--text-accent);
+}
+
+.repo-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.repo-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.15s;
+    font-size: 0.85rem;
+}
+
+.repo-item:last-child {
+    border-bottom: none;
+}
+
+.repo-item:hover {
+    background: var(--bg-hover);
+}
+
+.repo-item .repo-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.repo-item .repo-owner {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.repo-item .repo-private {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    background: #fff3cd;
+    color: #856404;
+    border-radius: 4px;
+    margin-left: auto;
+}
+
+.logout-btn {
+    margin-top: 12px;
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: white;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: var(--font-ui);
+    transition: all 0.15s;
+    width: 100%;
+}
+
+.logout-btn:hover {
+    background: #fee;
+    border-color: #e06c75;
+    color: #e06c75;
+}
+
+.github-setup {
+    margin-top: 24px;
+    text-align: left;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.github-setup a {
+    color: var(--text-accent);
+}
+
+.github-setup p {
+    margin-bottom: 12px;
+}

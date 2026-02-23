@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown Viewer</title>
+
+    <!-- Fuentes Modernas -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Tema de resaltado de código estilo GitHub Claro -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+
+    <!-- Estilos propios -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- Pantalla de Bienvenida (se oculta al elegir una fuente) -->
+    <div id="welcomeScreen" class="welcome-overlay">
+        <div class="welcome-card">
+            <h1 class="welcome-title">📝 Markdown Viewer</h1>
+            <p class="welcome-subtitle">Elige una fuente de archivos para comenzar</p>
+
+            <div class="source-options">
+                <!-- Opción 1: Carpeta Local -->
+                <button id="welcomeLocalBtn" class="source-btn">
+                    <div class="source-icon">
+                        <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
+                            </path>
+                        </svg>
+                    </div>
+                    <span class="source-title">Carpeta Local</span>
+                    <span class="source-desc">Abre una carpeta desde tu equipo</span>
+                </button>
+
+                <!-- Opción 2: GitHub -->
+                <button id="welcomeGitHubBtn" class="source-btn">
+                    <div class="source-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                        </svg>
+                    </div>
+                    <span class="source-title">GitHub</span>
+                    <span class="source-desc">Conecta con un repositorio</span>
+                </button>
+            </div>
+
+            <!-- Selector de repo GitHub (oculto por defecto) -->
+            <div id="githubRepoSelector" class="github-selector" style="display: none;">
+                <div class="github-user-info" id="githubUserInfo"></div>
+                <input type="text" id="repoSearchInput" class="repo-search" placeholder="Buscar repositorio...">
+                <div id="repoList" class="repo-list"></div>
+                <button id="githubLogoutBtn" class="logout-btn">Desconectar GitHub</button>
+            </div>
+
+            <!-- Config GitHub Token (solo primera vez) -->
+            <div id="githubSetup" class="github-setup" style="display: none;">
+                <p>Pega tu <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">Fine-grained
+                        Token</a> de GitHub:</p>
+                <input type="password" id="tokenInput" class="repo-search" placeholder="github_pat_xxxxxxxxx...">
+                <button id="saveTokenBtn" class="source-btn" style="width: 100%; margin-top: 8px;">
+                    <span class="source-title">Conectar</span>
+                </button>
+                <p style="margin-top: 8px; font-size: 0.75rem;">El token se guarda solo en tu navegador. Selecciona los
+                    repos que necesites y permiso <code>Contents: Read and write</code>.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- App principal (oculta hasta elegir fuente) -->
+    <div class="app-container" id="appContainer" style="display: none;">
+        <!-- Panel Lateral: Árbol de Archivos -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>FOLDERS</h2>
+                <div style="display: flex; gap: 4px;">
+                    <button id="openFolderBtn" class="action-btn" title="Abrir carpeta local">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
+                            </path>
+                        </svg>
+                    </button>
+                    <button id="homeBtn" class="action-btn" title="Volver a la pantalla de inicio">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">
+                            </path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="file-tree" id="fileTreeContainer">
+                <div class="loading-state">
+                    Selecciona una fuente de archivos...
+                </div>
+            </div>
+        </aside>
+
+        <!-- Botón para colapsar/expandir sidebar -->
+        <button id="toggleSidebarBtn" class="sidebar-toggle" title="Plegar/Desplegar carpetas">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+        </button>
+
+        <!-- Panel Principal: Contenido Markdown -->
+        <main class="content-panel">
+            <header class="content-header"
+                style="justify-content: space-between; align-items: center; padding-right: 15px;">
+                <div class="tabs" id="tabsContainer" style="flex: 1;">
+                </div>
+
+                <!-- Botonera del Editor -->
+                <div class="editor-toolbar" id="editorToolbar" style="display: none; gap: 8px;">
+                    <button id="toggleTocBtn" class="action-btn" title="Tabla de Contenidos"
+                        style="padding: 6px 12px; font-weight: 500;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            style="margin-right: 4px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 6h16M4 10h16M4 14h10M4 18h10"></path>
+                        </svg>
+                        TOC
+                    </button>
+                    <button id="toggleSplitBtn" class="action-btn" title="Activar/Desactivar Panel de Edición"
+                        style="padding: 6px 12px; font-weight: 500;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            style="margin-right: 4px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                            </path>
+                        </svg>
+                        Editar
+                    </button>
+                    <button id="saveFileBtn" class="action-btn" title="Guardar Cambios (Ctrl+S)"
+                        style="padding: 6px 12px; font-weight: 500; background-color: var(--bg-selection); color: white;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            style="margin-right: 4px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4">
+                            </path>
+                        </svg>
+                        Guardar
+                    </button>
+                </div>
+            </header>
+
+            <div class="split-view-container" style="display: flex; flex: 1; overflow: hidden;">
+                <!-- Panel de Edición (Oculto por defecto) -->
+                <div id="editorPanel" class="editor-panel"
+                    style="display: none; width: 50%; border-right: 1px solid var(--border-color); flex-direction: column;">
+                    <textarea id="markdownEditor" spellcheck="false"
+                        placeholder="Escribe tu Markdown aquí..."></textarea>
+                </div>
+
+                <!-- Panel de Previsualización -->
+                <div id="previewPanel" class="markdown-container"
+                    style="flex: 1; overflow-y: auto; padding: 40px; display: flex; justify-content: center;">
+                    <div id="markdownContent" class="markdown-body">
+                        <div class="welcome-screen">
+                            <h1>Markdown Viewer</h1>
+                            <p>Selecciona un archivo <code>.md</code> del panel izquierdo para comenzar.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel TOC (Oculto por defecto) -->
+                <aside id="tocPanel" class="toc-panel" style="display: none;">
+                    <div class="toc-header">
+                        <h3>Tabla de Contenidos</h3>
+                    </div>
+                    <nav id="tocList" class="toc-list">
+                        <p class="toc-empty">Abre un archivo para ver su estructura.</p>
+                    </nav>
+                </aside>
+            </div>
+        </main>
+    </div>
+
+    <!-- Librerías Externas vía CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+    <!-- Módulos de la aplicación -->
+    <script src="github.js"></script>
+    <script src="app.js"></script>
+
+</body>
+
+</html>
