@@ -617,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const label = document.createElement('span');
         label.className = 'item-label';
         label.textContent = item.name;
+        label.title = item.path || item.name;
 
         if (item.type === 'directory') {
             const chevron = document.createElement('span');
