@@ -724,7 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dirtyDot = tabData.dirty ? '<span class="dirty-dot">●</span>' : '';
             tabEl.innerHTML = `
                 <span class="file-icon"></span>
-                <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}${dirtyDot}</span>
+                <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}</span>${dirtyDot}
                 <button class="close-tab">×</button>
             `;
 
