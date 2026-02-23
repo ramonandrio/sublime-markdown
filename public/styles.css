@@ -358,9 +358,15 @@ body {
 }
 
 .welcome-screen {
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     margin-top: 20vh;
     color: var(--text-muted);
+}
+
+.welcome-screen p {
+    margin-top: 4px;
 }
 
 .welcome-screen h1 {
