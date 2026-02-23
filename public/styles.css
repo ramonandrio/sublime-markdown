@@ -141,13 +141,6 @@ body {
 
 .action-btn.btn-dirty {
     color: var(--text-accent);
-    background-color: rgba(9, 105, 218, 0.1);
-}
-
-.action-btn.btn-dirty::after {
-    content: '●';
-    margin-left: 6px;
-    font-size: 0.7rem;
 }
 
 .file-tree {
@@ -599,8 +592,22 @@ body {
 /* Dirty dot indicator */
 .dirty-dot {
     color: var(--text-accent);
-    margin-left: 4px;
-    font-size: 0.7rem;
+    margin-left: 5px;
+    font-size: 0.85rem;
+    animation: pulse-dot 1.5s ease-in-out infinite;
+    vertical-align: middle;
+}
+
+@keyframes pulse-dot {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
 }
 
 /* --- PANTALLA DE BIENVENIDA --- */
