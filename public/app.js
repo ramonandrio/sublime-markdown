@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentGitHubRepo = null;
     let currentLocalFolderHandle = null;
     let allRepos = [];
+    let expandedFolders = new Set();
 
     // Undo/Redo: historial por tab { tabId: { undoStack: [], redoStack: [] } }
     const tabHistory = {};
@@ -106,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentGitHubRepo,
             localFolderHandle: currentLocalFolderHandle,
             activeTabId,
+            expandedFolders: [...expandedFolders],
             openTabs: openTabs.map(t => ({
                 id: t.id,
                 name: t.name,
@@ -141,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentLocalFolderHandle = state.localFolderHandle;
             openTabs = state.openTabs || [];
             activeTabId = state.activeTabId;
+            expandedFolders = new Set(state.expandedFolders || []);
 
             showApp();
 
@@ -595,6 +598,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================
 
     function renderTreeItem(item, isExpanded = false) {
+        const itemPath = item.path || item.name;
+        // Use saved expanded state if available
+        if (item.type === 'directory' && expandedFolders.has(itemPath)) {
+            isExpanded = true;
+        }
         const itemContainer = document.createElement('div');
         itemContainer.className = 'tree-item-container';
 
@@ -650,6 +658,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 childrenContainer.style.display = isCurrentlyExpanded ? 'none' : 'block';
                 chevron.classList.toggle('expanded');
                 chevron.innerHTML = isCurrentlyExpanded ? '▶' : '▼';
+                // Track expanded state
+                if (isCurrentlyExpanded) {
+                    expandedFolders.delete(itemPath);
+                } else {
+                    expandedFolders.add(itemPath);
+                }
+                saveWorkspaceState();
             });
 
         } else {
