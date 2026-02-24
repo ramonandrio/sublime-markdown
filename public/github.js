@@ -150,8 +150,14 @@ const GitHubAPI = (() => {
         });
     }
 
+    async function searchCode(owner, repo, query) {
+        // Forzamos buscar solo en archivos .md de este repo
+        const q = encodeURIComponent(`${query} in:file repo:${owner}/${repo} extension:md`);
+        return apiCall(`/search/code?q=${q}&per_page=20`);
+    }
+
     return {
         getToken, setToken, clearToken, isAuthenticated,
-        getUser, listRepos, getRepoTree, getFileContent, saveFile
+        getUser, listRepos, getRepoTree, getFileContent, saveFile, searchCode
     };
 })();
