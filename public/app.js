@@ -42,7 +42,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let historyTimer = null;
 
     // Configurar Marked.js
+    const renderer = new marked.Renderer();
+    renderer.link = function (href, title, text) {
+        const titleAttr = title ? ` title="${title}"` : '';
+        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    };
+
     marked.setOptions({
+        renderer,
         highlight: function (code, lang) {
             const language = hljs.getLanguage(lang) ? lang : 'plaintext';
             return hljs.highlight(code, { language }).value;
