@@ -73,8 +73,22 @@
                 <button id="saveTokenBtn" class="source-btn" style="width: 100%; margin-top: 8px;">
                     <span class="source-title">Conectar</span>
                 </button>
-                <p style="margin-top: 8px; font-size: 0.75rem;">El token se guarda solo en tu navegador. Selecciona los
-                    repos que necesites y permiso <code>Contents: Read and write</code>.</p>
+
+                <!-- Acordeón de ayuda -->
+                <details class="github-help-details">
+                    <summary>¿Cómo configuro el token para ver repositorios privados?</summary>
+                    <div class="github-help-content">
+                        <p><strong>1.</strong> Haz clic en el enlace de arriba ("Fine-grained Token").</p>
+                        <p><strong>2.</strong> Ponle un nombre y elige su duración.</p>
+                        <p><strong>3.</strong> En <strong>Repository access</strong>, elige <em>"All repositories"</em>
+                            o <em>"Only select repositories"</em> (y selecciona los privados que necesites).</p>
+                        <p><strong>4.</strong> Despliega <strong>Repository permissions</strong>, busca
+                            <strong>Contents</strong> y ponlo en <em>"Read and write"</em>.</p>
+                        <p><strong>5.</strong> Baja del todo y dale a <strong>Generate token</strong>. Copia y pega aquí
+                            el código que empieza por <code>github_pat_</code>.</p>
+                        <p><em>💡 Nota: El token nunca sale de tu navegador web.</em></p>
+                    </div>
+                </details>
             </div>
         </div>
     </div>

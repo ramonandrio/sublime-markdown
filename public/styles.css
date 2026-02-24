@@ -967,6 +967,59 @@ body {
     margin-bottom: 12px;
 }
 
+.github-help-details {
+    margin-top: 16px;
+    background-color: var(--bg-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    text-align: left;
+}
+
+.github-help-details summary {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    outline: none;
+    transition: background-color 0.2s;
+}
+
+.github-help-details summary:hover {
+    background-color: var(--bg-selection);
+    color: #fff;
+}
+
+.github-help-content {
+    border-top: 1px solid var(--border-color);
+    padding: 12px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    background-color: var(--bg-dark);
+}
+
+.github-help-content p {
+    margin-bottom: 6px;
+    font-size: 0.75rem;
+}
+
+.github-help-content p:last-child {
+    margin-bottom: 0;
+}
+
+.github-help-content strong {
+    color: var(--text-primary);
+}
+
+.github-help-content code {
+    background-color: var(--bg-hover);
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: var(--text-accent);
+}
+
 /* === MOBILE RESPONSIVE === */
 
 /* Hamburger button - hidden on desktop */
