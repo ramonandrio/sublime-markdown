@@ -314,8 +314,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Logout GitHub
     githubLogoutBtn.addEventListener('click', () => {
         GitHubAPI.clearToken();
+        currentGitHubRepo = null;
+        activeTabId = null;
+        openTabs = [];
+        tabHistory = {};
+        saveWorkspaceState();
         githubRepoSelector.style.display = 'none';
-        showWelcomeScreen();
+
+        // Force reload to completely clear any cached state in memory
+        window.location.reload();
     });
 
     // ===================================

@@ -32,6 +32,7 @@ const GitHubAPI = (() => {
         }
 
         const response = await fetch(`https://api.github.com${endpoint}`, {
+            cache: 'no-store',
             ...options,
             headers
         });
