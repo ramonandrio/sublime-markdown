@@ -909,6 +909,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===================================
+    // TOAST NOTIFICATIONS
+    // ===================================
+
+    let toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toastContainer';
+        toastContainer.className = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+
+    function showToast(message, type = 'info', duration = 3500) {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.innerHTML = message;
+        toastContainer.appendChild(toast);
+
+        // Trigger animation
+        requestAnimationFrame(() => toast.classList.add('show'));
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            toast.addEventListener('transitionend', () => toast.remove());
+        }, duration);
+    }
+
+    // ===================================
     // FILE WATCHER (Polling para cambios externos)
     // ===================================
 
@@ -938,7 +965,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // El archivo cambió externamente
-                if (tab.dirty) continue; // No sobreescribir edits locales
+                if (tab.dirty) {
+                    showToast(`⚠️ <strong>${tab.name}</strong> modificado externamente (tienes cambios sin guardar)`, 'warning', 5000);
+                    continue;
+                }
 
                 // Actualizar silenciosamente
                 tab.rawContent = newContent;
@@ -955,6 +985,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 renderTabs();
                 saveWorkspaceState();
+                showToast(`🔄 <strong>${tab.name}</strong> actualizado`, 'success');
             } catch (e) {
                 // Ignorar errores de lectura
             }
