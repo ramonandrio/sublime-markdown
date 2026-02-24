@@ -54,7 +54,7 @@ const GitHubAPI = (() => {
     }
 
     async function listRepos(page = 1, perPage = 100) {
-        return apiCall(`/user/repos?sort=updated&per_page=${perPage}&page=${page}&affiliation=owner,collaborator,organization_member`);
+        return apiCall(`/user/repos?sort=updated&per_page=${perPage}&page=${page}&visibility=all&affiliation=owner,collaborator,organization_member`);
     }
 
     async function getRepoTree(owner, repo, branch = 'main') {
