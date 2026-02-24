@@ -1698,6 +1698,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openSearchModal() {
         if (!currentLocalFolderHandle && !currentGitHubRepo) return;
+
+        if (currentGitHubRepo) {
+            showToast('La búsqueda global (Cmd+P) está desactivada para repositorios GitHub debido a problemas con la API.', 'warning');
+            return;
+        }
         isSearchModalOpen = true;
         searchModal.style.display = 'flex';
         searchInput.value = '';
