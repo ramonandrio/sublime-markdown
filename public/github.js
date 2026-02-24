@@ -113,10 +113,27 @@ const GitHubAPI = (() => {
         }
     }
 
+    // Función auxiliar para decodificar Base64 a UTF-8 de forma segura
+    function base64ToUtf8(base64) {
+        const binString = atob(base64);
+        const bytes = new Uint8Array(binString.length);
+        for (let i = 0; i < binString.length; i++) {
+            bytes[i] = binString.charCodeAt(i);
+        }
+        return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    // Función auxiliar para codificar UTF-8 a Base64 de forma segura
+    function utf8ToBase64(text) {
+        const bytes = new TextEncoder().encode(text);
+        const binString = String.fromCodePoint(...bytes);
+        return btoa(binString);
+    }
+
     async function getFileContent(owner, repo, path) {
         const data = await apiCall(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`);
         return {
-            content: atob(data.content),
+            content: base64ToUtf8(data.content),
             sha: data.sha
         };
     }
@@ -127,7 +144,7 @@ const GitHubAPI = (() => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message,
-                content: btoa(unescape(encodeURIComponent(content))),
+                content: utf8ToBase64(content),
                 sha
             })
         });
