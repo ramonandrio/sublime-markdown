@@ -43,9 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Configurar Marked.js
     const renderer = new marked.Renderer();
-    renderer.link = function (href, title, text) {
-        const titleAttr = title ? ` title="${title}"` : '';
-        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    const originalLink = renderer.link.bind(renderer);
+    renderer.link = function (token) {
+        const html = originalLink(token);
+        // Add target="_blank" to all links
+        return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
     };
 
     marked.setOptions({
