@@ -1818,7 +1818,25 @@ document.addEventListener('DOMContentLoaded', () => {
             renderSearchResults();
 
         } else if (currentGitHubRepo) {
-            // GITHUB: API Search
+            // GITHUB: 1. Instantly show path matches from flatSearchPaths
+            let pathResults = [];
+            if (flatSearchPaths && flatSearchPaths.length > 0) {
+                pathResults = flatSearchPaths
+                    .filter(item => item.name.toLowerCase().includes(q) || item.path.toLowerCase().includes(q))
+                    .map(item => ({
+                        path: item.path,
+                        name: item.name,
+                        isTitleMatch: true,
+                        snippet: ''
+                    }));
+
+                pathResults.sort((a, b) => a.name.localeCompare(b.name));
+            }
+
+            currentSearchResults = pathResults.slice(0, 20);
+            renderSearchResults();
+
+            // GITHUB: 2. API Search for inside contents (asynchronously appended)
             searchSpinner.style.display = 'block';
             try {
                 // API requiere algo de formato, evitamos rate limits
@@ -1826,17 +1844,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 searchSpinner.style.display = 'none';
 
                 if (data && data.items) {
-                    currentSearchResults = data.items.slice(0, 20).map(item => ({
-                        path: item.path,
-                        name: item.name,
-                        isTitleMatch: item.name.toLowerCase().includes(q),
-                        snippet: '...' // GitHub API a veces da text-matches pero requiere header específico, lo dejamos simple por ahora
-                    }));
+                    const existingPaths = new Set(currentSearchResults.map(r => r.path));
+                    const apiResults = data.items
+                        .filter(item => !existingPaths.has(item.path))
+                        .map(item => ({
+                            path: item.path,
+                            name: item.name,
+                            isTitleMatch: item.name.toLowerCase().includes(q),
+                            snippet: '... coincidencia en contenido ...'
+                        }));
+
+                    currentSearchResults = [...currentSearchResults, ...apiResults].slice(0, 20);
                     renderSearchResults();
                 }
             } catch (err) {
                 searchSpinner.style.display = 'none';
-                searchResults.innerHTML = `<div style="padding: 10px; color: var(--text-warning);">Error: ${err.message}</div>`;
+                if (currentSearchResults.length === 0) {
+                    searchResults.innerHTML = `<div style="padding: 10px; color: var(--text-warning);">Buscar texto: ${err.message}</div>`;
+                }
             }
         }
     }
