@@ -768,6 +768,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
             itemRow.appendChild(iconWrapper);
             itemRow.appendChild(label);
+
+            const newFileBtn = document.createElement('button');
+            newFileBtn.className = 'new-file-btn';
+            newFileBtn.title = 'Nuevo archivo .md';
+            newFileBtn.innerHTML = `
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+            `;
+            newFileBtn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Prevent folder expand/collapse
+                const fileName = prompt(`Crear nuevo archivo en ${item.name}/\nEl archivo tendrá extensión .md automáticamente:`, 'nuevo-documento');
+                if (!fileName) return;
+
+                let finalName = fileName.trim();
+                if (!finalName.toLowerCase().endsWith('.md')) {
+                    finalName += '.md';
+                }
+
+                await createNewFile(item, finalName);
+            });
+            itemRow.appendChild(newFileBtn);
+
             itemContainer.appendChild(itemRow);
 
             const childrenContainer = document.createElement('div');
@@ -1092,6 +1115,61 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }, 5000);
+
+    // ===================================
+    // CREATION
+    // ===================================
+
+    async function createNewFile(folderItem, fileName) {
+        try {
+            if (currentLocalFolderHandle) {
+                // Es un archivo local
+                let targetDirHandle = currentLocalFolderHandle;
+
+                // Si la carpeta no es la raíz, tenemos que navegar a ella
+                if (folderItem.path !== currentLocalFolderHandle.name) {
+                    // El path en local es "Raiz/Sub/Dir". Quitamos la raíz.
+                    const relPath = folderItem.path.substring(currentLocalFolderHandle.name.length + 1);
+                    const parts = relPath.split('/');
+                    for (const part of parts) {
+                        targetDirHandle = await targetDirHandle.getDirectoryHandle(part);
+                    }
+                }
+
+                // Crear el archivo (esto fallará si ya existe)
+                const newFileHandle = await targetDirHandle.getFileHandle(fileName, { create: true });
+                // Refrescar el árbol
+                await renderLocalFolder(currentLocalFolderHandle);
+
+                showToast(`Archivo <strong>${fileName}</strong> creado localmente.`, 'success');
+            } else if (currentGitHubRepo) {
+                // Es un archivo en GitHub
+                const newFilePath = folderItem.path ? `${folderItem.path}/${fileName}` : fileName;
+                const initialContent = `# ${fileName.replace('.md', '')}\n\n`;
+
+                showToast(`Creando <strong>${fileName}</strong> en GitHub...`, 'info', 2000);
+
+                await GitHubAPI.saveFile(
+                    currentGitHubRepo.owner,
+                    currentGitHubRepo.repo,
+                    newFilePath,
+                    initialContent,
+                    null // null SHA means create new file
+                );
+
+                // Refrescar el árbol de GitHub y volver a renderizar
+                fileTreeContainer.innerHTML = '<div class="loading-state">Actualizando repositorio...</div>';
+                const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+                fileTreeContainer.innerHTML = '';
+                fileTreeContainer.appendChild(renderTreeItem(treeData, true));
+
+                showToast(`Archivo <strong>${fileName}</strong> creado en GitHub.`, 'success');
+            }
+        } catch (err) {
+            console.error('Error creating file:', err);
+            showToast(`Error al crear archivo: ${err.message}`, 'warning', 5000);
+        }
+    }
 
     // ===================================
     // GUARDADO

@@ -230,6 +230,32 @@ body {
     filter: none;
 }
 
+/* Botón Nuevo Archivo (oculto por defecto) */
+.new-file-btn {
+    display: none;
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.new-file-btn:hover {
+    color: var(--text-accent);
+    background: rgba(124, 58, 237, 0.1);
+}
+
+/* Mostrar botón Nuevo Archivo al hacer hover en un directorio */
+.tree-item-content:hover .new-file-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .file-icon::before {
     content: '📄';
     font-size: 0.9rem;
