@@ -83,7 +83,8 @@
                         <p><strong>3.</strong> En <strong>Repository access</strong>, elige <em>"All repositories"</em>
                             o <em>"Only select repositories"</em> (y selecciona los privados que necesites).</p>
                         <p><strong>4.</strong> Despliega <strong>Repository permissions</strong>, busca
-                            <strong>Contents</strong> y ponlo en <em>"Read and write"</em>.</p>
+                            <strong>Contents</strong> y ponlo en <em>"Read and write"</em>.
+                        </p>
                         <p><strong>5.</strong> Baja del todo y dale a <strong>Generate token</strong>. Copia y pega aquí
                             el código que empieza por <code>github_pat_</code>.</p>
                         <p><em>💡 Nota: El token nunca sale de tu navegador web.</em></p>
@@ -107,10 +108,13 @@
         <!-- Panel Lateral: Árbol de Archivos -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <h2 style="display: flex; align-items: center; gap: 6px;">
-                    <img src="/favicon.png" alt="" width="18" height="18" style="border-radius: 3px;">
-                    SUBLIME MARKDOWN
-                </h2>
+                <div>
+                    <h2 style="display: flex; align-items: center; gap: 6px;">
+                        <img src="/favicon.png" alt="" width="18" height="18" style="border-radius: 3px;">
+                        SUBLIME MARKDOWN
+                    </h2>
+                    <div id="sourceIndicator" class="source-indicator"></div>
+                </div>
                 <div style="display: flex; gap: 4px;">
                     <button id="openFolderBtn" class="action-btn desktop-only" title="Abrir carpeta local">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">

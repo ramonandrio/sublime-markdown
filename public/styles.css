@@ -122,6 +122,20 @@ body {
     color: var(--text-muted);
 }
 
+.source-indicator {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 170px;
+}
+
 .action-btn {
     background: transparent;
     border: none;
