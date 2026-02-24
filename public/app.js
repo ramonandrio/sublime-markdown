@@ -28,6 +28,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveTokenBtn = document.getElementById('saveTokenBtn');
     const sourceIndicator = document.getElementById('sourceIndicator');
 
+    // Search Modal
+    const searchModal = document.getElementById('searchModal');
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const searchSpinner = document.getElementById('searchSpinner');
+
     // State
     let openTabs = [];
     let activeTabId = null;
@@ -37,6 +43,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentLocalFolderHandle = null;
     let allRepos = [];
     let expandedFolders = new Set();
+
+    // Search State
+    let localSearchIndex = new Map(); // path -> { path, name, rawContent }
+    let isSearchModalOpen = false;
+    let searchDebounceTimer = null;
+    let searchSelectedIndex = -1;
+    let currentSearchResults = [];
+    let isIndexing = false;
 
     function updateSourceIndicator() {
         if (!sourceIndicator) return;
@@ -425,6 +439,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+            if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
+
             fileTreeContainer.innerHTML = '';
             const rootEl = renderTreeItem(treeData, true);
             fileTreeContainer.appendChild(rootEl);
@@ -718,6 +734,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fileTreeContainer.innerHTML = '<div class="loading-state">Leyendo carpeta...</div>';
         try {
             const treeData = await getTreeFromHandle(dirHandle, '');
+            if (typeof startLocalIndexing === 'function') startLocalIndexing(treeData);
+
             fileTreeContainer.innerHTML = '';
             const rootEl = renderTreeItem(treeData, true);
             fileTreeContainer.appendChild(rootEl);
@@ -1620,6 +1638,268 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetTop < currentScroll || targetTop > currentScroll + editorHeight - lineHeight * 2) {
             markdownEditor.scrollTop = Math.max(0, targetTop - lineHeight * 2);
         }
+    }
+
+    // ===================================
+    // GLOBAL SEARCH (Cmd+P)
+    // ===================================
+
+    // Flat list of paths for current workspace
+    let flatSearchPaths = [];
+
+    function flattenTreeToPaths(node) {
+        let paths = [];
+        if (node.type === 'file' && node.name.endsWith('.md')) {
+            paths.push({ path: node.path, name: node.name, type: 'file' });
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                paths = paths.concat(flattenTreeToPaths(child));
+            }
+        }
+        return paths;
+    }
+
+    async function startLocalIndexing(treeData) {
+        flatSearchPaths = flattenTreeToPaths(treeData);
+        localSearchIndex.clear();
+        isIndexing = true;
+
+        // Asynchronously load all files into memory
+        for (const item of flatSearchPaths) {
+            try {
+                // Navegar hasta el handle del archivo
+                const parts = item.path.split('/');
+                let targetDir = currentLocalFolderHandle;
+                if (parts.length > 1) {
+                    for (let i = 1; i < parts.length - 1; i++) {
+                        targetDir = await targetDir.getDirectoryHandle(parts[i]);
+                    }
+                }
+                const fileName = parts[parts.length - 1];
+                const fileHandle = await targetDir.getFileHandle(fileName);
+                const file = await fileHandle.getFile();
+                const content = await file.text();
+
+                localSearchIndex.set(item.path, {
+                    path: item.path,
+                    name: item.name,
+                    content: content.toLowerCase(),
+                    rawContent: content
+                });
+            } catch (err) {
+                console.warn("Error indexing file:", item.path, err);
+            }
+            // Pequeña pausa para no bloquear la UI
+            await new Promise(r => setTimeout(r, 2));
+        }
+        isIndexing = false;
+    }
+
+    function openSearchModal() {
+        if (!currentLocalFolderHandle && !currentGitHubRepo) return;
+        isSearchModalOpen = true;
+        searchModal.style.display = 'flex';
+        searchInput.value = '';
+        searchResults.innerHTML = '';
+        currentSearchResults = [];
+        searchSelectedIndex = -1;
+        searchInput.focus();
+        searchSpinner.style.display = 'none';
+
+        // Si no hay búsqueda aún, mostrar archivos recientes o simplemente la lista de paths
+        if (flatSearchPaths.length === 0 && currentGitHubRepo && lastTreeHash) {
+            // Reconstruimos la lista plana si tenemos el árbol (via hash o caché)
+        }
+    }
+
+    function closeSearchModal() {
+        isSearchModalOpen = false;
+        searchModal.style.display = 'none';
+        searchInput.blur();
+        if (editorPanel.style.display === 'flex') {
+            markdownEditor.focus();
+        }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        // Cmd+P (Mac) or Ctrl+P (Win)
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+            e.preventDefault(); // Evitar imprimir
+            if (isSearchModalOpen) closeSearchModal();
+            else openSearchModal();
+        }
+
+        if (!isSearchModalOpen) return;
+
+        // Navegación con teclado en el modal
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closeSearchModal();
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (currentSearchResults.length > 0) {
+                searchSelectedIndex = Math.min(searchSelectedIndex + 1, currentSearchResults.length - 1);
+                updateSearchSelection();
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentSearchResults.length > 0) {
+                searchSelectedIndex = Math.max(searchSelectedIndex - 1, 0);
+                updateSearchSelection();
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (searchSelectedIndex >= 0 && searchSelectedIndex < currentSearchResults.length) {
+                const selected = currentSearchResults[searchSelectedIndex];
+                openFileFromSearch(selected);
+                closeSearchModal();
+            }
+        }
+    });
+
+    function updateSearchSelection() {
+        const items = searchResults.querySelectorAll('.search-result-item');
+        items.forEach((item, index) => {
+            if (index === searchSelectedIndex) {
+                item.classList.add('selected');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('selected');
+            }
+        });
+    }
+
+    function getSnippet(content, queryLower) {
+        const idx = content.toLowerCase().indexOf(queryLower);
+        if (idx === -1) return '';
+        const start = Math.max(0, idx - 40);
+        const end = Math.min(content.length, idx + queryLower.length + 40);
+        let snippet = content.substring(start, end);
+        if (start > 0) snippet = '...' + snippet;
+        if (end < content.length) snippet = snippet + '...';
+        return snippet.replace(/\n/g, ' ');
+    }
+
+    async function performSearch(query) {
+        const q = query.toLowerCase().trim();
+        searchResults.innerHTML = '';
+        currentSearchResults = [];
+        searchSelectedIndex = -1;
+
+        if (!q) return;
+
+        if (currentLocalFolderHandle) {
+            // LOCAL: Buscar RAM instantáneamente
+            let results = [];
+            for (const [path, data] of localSearchIndex.entries()) {
+                const pathMatch = path.toLowerCase().includes(q);
+                const contentMatch = data.content.includes(q);
+
+                if (pathMatch || contentMatch) {
+                    results.push({
+                        path: data.path,
+                        name: data.name,
+                        isTitleMatch: pathMatch,
+                        snippet: contentMatch ? getSnippet(data.rawContent, q) : ''
+                    });
+                }
+            }
+
+            // Ordenar: Coincidencias en título primero
+            results.sort((a, b) => {
+                if (a.isTitleMatch && !b.isTitleMatch) return -1;
+                if (!a.isTitleMatch && b.isTitleMatch) return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            // Top 20 resultados
+            currentSearchResults = results.slice(0, 20);
+            renderSearchResults();
+
+        } else if (currentGitHubRepo) {
+            // GITHUB: API Search
+            searchSpinner.style.display = 'block';
+            try {
+                // API requiere algo de formato, evitamos rate limits
+                const data = await GitHubAPI.searchCode(currentGitHubRepo.owner, currentGitHubRepo.repo, q);
+                searchSpinner.style.display = 'none';
+
+                if (data && data.items) {
+                    currentSearchResults = data.items.slice(0, 20).map(item => ({
+                        path: item.path,
+                        name: item.name,
+                        isTitleMatch: item.name.toLowerCase().includes(q),
+                        snippet: '...' // GitHub API a veces da text-matches pero requiere header específico, lo dejamos simple por ahora
+                    }));
+                    renderSearchResults();
+                }
+            } catch (err) {
+                searchSpinner.style.display = 'none';
+                searchResults.innerHTML = `<div style="padding: 10px; color: var(--text-warning);">Error: ${err.message}</div>`;
+            }
+        }
+    }
+
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value;
+        clearTimeout(searchDebounceTimer);
+
+        if (currentLocalFolderHandle) {
+            // Local es instantáneo, poco debounce
+            searchDebounceTimer = setTimeout(() => performSearch(query), 100);
+        } else {
+            // GitHub penaliza muchisimo el rate limit (10 por min), debounce alto
+            searchDebounceTimer = setTimeout(() => performSearch(query), 800);
+        }
+    });
+
+    function renderSearchResults() {
+        searchResults.innerHTML = '';
+        if (currentSearchResults.length === 0) {
+            searchResults.innerHTML = `<div style="padding: 10px; color: var(--text-muted); font-size: 0.9rem;">No se encontraron resultados.</div>`;
+            return;
+        }
+
+        currentSearchResults.forEach((res, index) => {
+            const div = document.createElement('div');
+            div.className = 'search-result-item';
+            div.innerHTML = `
+                <div class="search-result-title">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    ${res.name}
+                </div>
+                <div class="search-result-path">${res.path}</div>
+                ${res.snippet ? `<div class="search-result-snippet">${res.snippet}</div>` : ''}
+            `;
+
+            div.addEventListener('click', () => {
+                openFileFromSearch(res);
+                closeSearchModal();
+            });
+
+            // Hover manual tracking for keyboard sync
+            div.addEventListener('mouseenter', () => {
+                searchSelectedIndex = index;
+                updateSearchSelection();
+            });
+
+            searchResults.appendChild(div);
+        });
+
+        // Set initial selection
+        searchSelectedIndex = 0;
+        updateSearchSelection();
+    }
+
+    function openFileFromSearch(result) {
+        // Necesitamos construir el objeto 'item' que espera openFile()
+        const fakeItem = {
+            path: result.path,
+            name: result.name,
+            type: 'file'
+        };
+        openFile(fakeItem);
     }
 
 });

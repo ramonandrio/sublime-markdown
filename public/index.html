@@ -249,6 +249,30 @@
         </main>
     </div>
 
+    <!-- Modal de Búsqueda Global (Cmd+P) -->
+    <div id="searchModal" class="search-modal" style="display: none;">
+        <div class="search-modal-content">
+            <div class="search-input-wrapper">
+                <svg class="search-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+                <input type="text" id="searchInput" class="search-input"
+                    placeholder="Buscar archivos por nombre o contenido (Cmd+P)..." autocomplete="off"
+                    spellcheck="false">
+                <div class="search-spinner" id="searchSpinner" style="display: none;"></div>
+            </div>
+            <div id="searchResults" class="search-results">
+                <!-- Resultados se inyectan aquí -->
+            </div>
+            <div class="search-footer">
+                <span><kbd>↑</kbd><kbd>↓</kbd> navegar</span>
+                <span><kbd>Enter</kbd> abrir</span>
+                <span><kbd>Esc</kbd> cerrar</span>
+            </div>
+        </div>
+    </div>
+
     <!-- Librerías Externas vía CDN -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
