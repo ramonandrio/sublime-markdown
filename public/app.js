@@ -1093,7 +1093,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // FILE WATCHER (Polling para cambios externos)
     // ===================================
 
+    let lastTreeHash = null;
+
+    // Helper para generar un "hash" rápido de los archivos que vemos
+    function hashTreeData(data) {
+        return JSON.stringify(data, (key, val) => key === 'children' ? val : val);
+    }
+
     setInterval(async () => {
+        // 1. Revisar si hay un árbol cargado para sondear cambios estructurales (archivos nuevos/eliminados)
+        try {
+            if (currentLocalFolderHandle) {
+                // Generar vista en crudo de todo el directorio
+                const newTreeData = await getTreeFromHandle(currentLocalFolderHandle, '');
+                const currentHash = hashTreeData(newTreeData);
+
+                if (lastTreeHash !== null && lastTreeHash !== currentHash) {
+                    lastTreeHash = currentHash;
+                    // Solo recargar si cambia:
+                    fileTreeContainer.innerHTML = '';
+                    const rootEl = renderTreeItem(newTreeData, true);
+                    fileTreeContainer.appendChild(rootEl);
+                } else {
+                    lastTreeHash = currentHash;
+                }
+            } else if (currentGitHubRepo) {
+                // Pedir el commit SHAs tree de github
+                const newTreeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+                const currentHash = hashTreeData(newTreeData);
+
+                if (lastTreeHash !== null && lastTreeHash !== currentHash) {
+                    lastTreeHash = currentHash;
+                    fileTreeContainer.innerHTML = '';
+                    const rootEl = renderTreeItem(newTreeData, true);
+                    fileTreeContainer.appendChild(rootEl);
+                } else {
+                    lastTreeHash = currentHash;
+                }
+            }
+        } catch (e) { /* ignore tree polling errors */ }
+
+        // 2. Revisar archivos abiertos modificados externamente
         for (const tab of openTabs) {
             try {
                 let newContent = null;
@@ -1169,6 +1209,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Crear el archivo (esto fallará si ya existe)
                 const newFileHandle = await targetDirHandle.getFileHandle(fileName, { create: true });
                 // Refrescar el árbol
+                lastTreeHash = null;
                 await renderLocalFolder(currentLocalFolderHandle);
 
                 showToast(`Archivo <strong>${fileName}</strong> creado localmente.`, 'success');
@@ -1189,6 +1230,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Refrescar el árbol de GitHub y volver a renderizar
                 fileTreeContainer.innerHTML = '<div class="loading-state">Actualizando repositorio...</div>';
+                lastTreeHash = null;
                 const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
                 fileTreeContainer.innerHTML = '';
                 fileTreeContainer.appendChild(renderTreeItem(treeData, true));
