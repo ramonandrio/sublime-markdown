@@ -595,6 +595,132 @@ body {
     font-size: 0.75rem;
 }
 
+/* === NOTES PANEL === */
+.notes-panel {
+    width: 300px;
+    min-width: 250px;
+    max-width: 400px;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-dark);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.notes-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.notes-header h3 {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.notes-badge {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #f0e6ff;
+    color: #7c3aed;
+    font-weight: 600;
+}
+
+.notes-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+}
+
+.notes-textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: var(--font-ui);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    background: #fff;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.notes-textarea:focus {
+    border-color: var(--text-accent);
+}
+
+.notes-textarea::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.notes-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.notes-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.notes-btn {
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-weight: 500;
+}
+
+.notes-btn-save {
+    background: var(--text-accent);
+    color: #fff;
+    border-color: var(--text-accent);
+}
+
+.notes-btn-save:hover {
+    opacity: 0.85;
+}
+
+.notes-btn-danger {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.notes-btn-danger:hover {
+    background: #fee;
+    border-color: #e06c75;
+    color: #e06c75;
+}
+
+.notes-has-content {
+    position: relative;
+}
+
+.notes-has-content::after {
+    content: '●';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    font-size: 0.5rem;
+    color: #7c3aed;
+}
+
 /* Dirty dot indicator */
 .dirty-dot {
     color: var(--text-accent);

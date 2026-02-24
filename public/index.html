@@ -146,6 +146,16 @@
                         </svg>
                         TOC
                     </button>
+                    <button id="toggleNotesBtn" class="action-btn" title="Notas personales"
+                        style="padding: 6px 12px; font-weight: 500;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            style="margin-right: 4px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z">
+                            </path>
+                        </svg>
+                        Notas
+                    </button>
                     <button id="toggleSplitBtn" class="action-btn" title="Activar/Desactivar Panel de Edición"
                         style="padding: 6px 12px; font-weight: 500;">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -196,6 +206,26 @@
                     <nav id="tocList" class="toc-list">
                         <p class="toc-empty">Abre un archivo para ver su estructura.</p>
                     </nav>
+                </aside>
+
+                <!-- Panel de Notas Personales (Oculto por defecto) -->
+                <aside id="notesPanel" class="notes-panel" style="display: none;">
+                    <div class="notes-header">
+                        <h3>📝 Mis Notas</h3>
+                        <span class="notes-badge">Solo tú</span>
+                    </div>
+                    <div class="notes-body">
+                        <textarea id="notesTextarea" class="notes-textarea"
+                            placeholder="Escribe tus notas personales sobre este archivo..."></textarea>
+                        <div class="notes-footer">
+                            <span class="notes-hint">🔒 Guardadas localmente en tu navegador</span>
+                            <div style="display: flex; gap: 6px;">
+                                <button id="deleteNoteBtn" class="notes-btn notes-btn-danger"
+                                    title="Borrar notas">Borrar</button>
+                                <button id="saveNoteBtn" class="notes-btn notes-btn-save">Guardar nota</button>
+                            </div>
+                        </div>
+                    </div>
                 </aside>
             </div>
         </main>

@@ -68,16 +68,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const WorkspaceDB = (() => {
         const DB_NAME = 'MarkdownViewerDB';
         const STORE_NAME = 'workspace';
+        const NOTES_STORE = 'notes';
 
         function getDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, 1);
+                const request = indexedDB.open(DB_NAME, 2);
                 request.onerror = () => reject(request.error);
                 request.onsuccess = () => resolve(request.result);
                 request.onupgradeneeded = (e) => {
                     const db = e.target.result;
                     if (!db.objectStoreNames.contains(STORE_NAME)) {
                         db.createObjectStore(STORE_NAME);
+                    }
+                    if (!db.objectStoreNames.contains(NOTES_STORE)) {
+                        db.createObjectStore(NOTES_STORE);
                     }
                 };
             });
@@ -105,7 +109,40 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        return { save, load, getDB };
+        async function saveNote(fileId, text) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(NOTES_STORE, 'readwrite');
+                const store = tx.objectStore(NOTES_STORE);
+                const request = store.put({ text, updatedAt: Date.now() }, fileId);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function loadNote(fileId) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(NOTES_STORE, 'readonly');
+                const store = tx.objectStore(NOTES_STORE);
+                const request = store.get(fileId);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function deleteNote(fileId) {
+            const db = await getDB();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(NOTES_STORE, 'readwrite');
+                const store = tx.objectStore(NOTES_STORE);
+                const request = store.delete(fileId);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        return { save, load, getDB, saveNote, loadNote, deleteNote };
     })();
 
     async function saveWorkspaceState() {
@@ -456,6 +493,64 @@ document.addEventListener('DOMContentLoaded', () => {
         updateTocVisibility();
     });
 
+    // Toggle Notes Panel
+    const notesPanel = document.getElementById('notesPanel');
+    const toggleNotesBtn = document.getElementById('toggleNotesBtn');
+    const notesTextarea = document.getElementById('notesTextarea');
+    const saveNoteBtn = document.getElementById('saveNoteBtn');
+    const deleteNoteBtn = document.getElementById('deleteNoteBtn');
+    let isNotesOpen = false;
+
+    toggleNotesBtn.addEventListener('click', () => {
+        isNotesOpen = !isNotesOpen;
+        notesPanel.style.display = isNotesOpen ? 'flex' : 'none';
+        if (isNotesOpen && activeTabId) loadNoteForFile(activeTabId);
+    });
+
+    async function loadNoteForFile(fileId) {
+        try {
+            const note = await WorkspaceDB.loadNote(fileId);
+            notesTextarea.value = note ? note.text : '';
+            updateNotesIndicator(fileId);
+        } catch (e) {
+            notesTextarea.value = '';
+        }
+    }
+
+    async function updateNotesIndicator(fileId) {
+        try {
+            const note = await WorkspaceDB.loadNote(fileId);
+            if (note && note.text.trim()) {
+                toggleNotesBtn.classList.add('notes-has-content');
+            } else {
+                toggleNotesBtn.classList.remove('notes-has-content');
+            }
+        } catch (e) {
+            toggleNotesBtn.classList.remove('notes-has-content');
+        }
+    }
+
+    saveNoteBtn.addEventListener('click', async () => {
+        if (!activeTabId) return;
+        const text = notesTextarea.value.trim();
+        if (text) {
+            await WorkspaceDB.saveNote(activeTabId, text);
+            showToast('💾 Nota guardada', 'success', 2000);
+        } else {
+            await WorkspaceDB.deleteNote(activeTabId);
+            showToast('🗑️ Nota eliminada', 'info', 2000);
+        }
+        updateNotesIndicator(activeTabId);
+    });
+
+    deleteNoteBtn.addEventListener('click', async () => {
+        if (!activeTabId) return;
+        await WorkspaceDB.deleteNote(activeTabId);
+        notesTextarea.value = '';
+        showToast('🗑️ Nota eliminada', 'info', 2000);
+        updateNotesIndicator(activeTabId);
+    });
+
     // Guardar
     saveFileBtn.addEventListener('click', () => saveActiveFile());
 
@@ -800,6 +895,12 @@ document.addEventListener('DOMContentLoaded', () => {
         activeTabId = fileId;
         renderTabs();
         saveWorkspaceState();
+
+        // Load notes for new active tab
+        if (fileId) {
+            if (isNotesOpen) loadNoteForFile(fileId);
+            updateNotesIndicator(fileId);
+        }
 
         document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
         if (fileId) {
