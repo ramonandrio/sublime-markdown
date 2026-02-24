@@ -462,7 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
 
         const rawHtml = marked.parse(activeTab.rawContent);
-        activeTab.content = DOMPurify.sanitize(rawHtml);
+        activeTab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
         markdownContent.innerHTML = activeTab.content;
 
         if (isTocOpen) generateTOC();
@@ -549,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTab.rawContent = snapshot.text;
             activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
             const rawHtml = marked.parse(activeTab.rawContent);
-            activeTab.content = DOMPurify.sanitize(rawHtml);
+            activeTab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
             markdownContent.innerHTML = activeTab.content;
             if (isTocOpen) generateTOC();
             renderTabs();
@@ -860,7 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tabData.rawContent = markdownText;
             tabData.savedContent = markdownText;
             const rawHtml = marked.parse(markdownText);
-            tabData.content = DOMPurify.sanitize(rawHtml);
+            tabData.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
 
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
@@ -915,7 +915,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 tab.rawContent = newContent;
                 tab.savedContent = newContent;
                 const rawHtml = marked.parse(newContent);
-                tab.content = DOMPurify.sanitize(rawHtml);
+                tab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
 
                 if (tab.id === activeTabId) {
                     markdownContent.innerHTML = tab.content;
