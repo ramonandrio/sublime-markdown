@@ -814,3 +814,125 @@ body {
 .github-setup p {
     margin-bottom: 12px;
 }
+
+/* === MOBILE RESPONSIVE === */
+
+/* Hamburger button - hidden on desktop */
+.mobile-menu-btn {
+    display: none;
+}
+
+/* Sidebar overlay - hidden on desktop */
+.sidebar-overlay {
+    display: none;
+}
+
+@media (max-width: 768px) {
+
+    /* Hamburger button */
+    .mobile-menu-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 1001;
+        background: var(--bg-darker);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-primary);
+        padding: 6px;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Sidebar overlay */
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 999;
+    }
+
+    .sidebar-overlay.active {
+        display: block;
+    }
+
+    /* Sidebar as slide-in drawer */
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 1000;
+        width: 280px !important;
+        max-width: 85vw;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.15);
+    }
+
+    .sidebar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .sidebar.collapsed {
+        transform: translateX(-100%);
+    }
+
+    /* Hide sidebar collapse button on mobile */
+    .sidebar-toggle {
+        display: none;
+    }
+
+    /* Hide desktop-only elements */
+    .desktop-only {
+        display: none !important;
+    }
+
+    /* Hide editor toolbar buttons except TOC */
+    .editor-toolbar #toggleSplitBtn,
+    .editor-toolbar #saveFileBtn {
+        display: none !important;
+    }
+
+    /* Full width content panel */
+    .content-panel {
+        width: 100%;
+    }
+
+    /* Adjust markdown content padding for mobile */
+    .markdown-container {
+        padding: 16px !important;
+    }
+
+    /* Tabs should scroll */
+    .tabs {
+        padding-left: 40px;
+    }
+
+    /* Welcome card adjustments */
+    .welcome-card {
+        width: 90vw !important;
+        max-width: 400px;
+        padding: 24px !important;
+    }
+
+    .source-options {
+        flex-direction: column !important;
+    }
+
+    .source-btn {
+        max-width: none !important;
+    }
+
+    /* Welcome title smaller */
+    .welcome-title {
+        font-size: 1.3rem !important;
+    }
+}

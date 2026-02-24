@@ -416,11 +416,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Toggle Sidebar
     const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
-    const sidebar = document.querySelector('.sidebar');
+    const sidebar = document.getElementById('sidebar');
     toggleSidebarBtn.addEventListener('click', () => {
         sidebar.classList.toggle('collapsed');
         toggleSidebarBtn.classList.toggle('collapsed');
     });
+
+    // Mobile sidebar drawer
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+    function isMobile() {
+        return window.matchMedia('(max-width: 768px)').matches;
+    }
+
+    function openMobileSidebar() {
+        sidebar.classList.add('mobile-open');
+        sidebarOverlay.classList.add('active');
+    }
+
+    function closeMobileSidebar() {
+        sidebar.classList.remove('mobile-open');
+        sidebarOverlay.classList.remove('active');
+    }
+
+    mobileMenuBtn.addEventListener('click', () => {
+        if (sidebar.classList.contains('mobile-open')) {
+            closeMobileSidebar();
+        } else {
+            openMobileSidebar();
+        }
+    });
+
+    sidebarOverlay.addEventListener('click', closeMobileSidebar);
 
     // Toggle TOC
     toggleTocBtn.addEventListener('click', () => {
@@ -691,6 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
             itemRow.addEventListener('click', (e) => {
                 e.stopPropagation();
                 openFileTab(item);
+                if (isMobile()) closeMobileSidebar();
             });
         }
 
