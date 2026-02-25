@@ -1056,6 +1056,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 previewPanel.style.padding = '0';
                 markdownContent.style.maxWidth = 'none';
                 markdownContent.style.height = '100%';
+                markdownContent.style.flex = '1';
                 markdownContent.style.display = 'flex';
                 markdownContent.style.flexDirection = 'column';
 
@@ -1074,7 +1075,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 previewPanel.style.padding = '40px';
                 markdownContent.style.maxWidth = '';
                 markdownContent.style.height = '';
+                markdownContent.style.flex = '';
                 markdownContent.style.display = '';
+                markdownContent.style.flexDirection = '';
             }
 
             if (activeTab.content) {
