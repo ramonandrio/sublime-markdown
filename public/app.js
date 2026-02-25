@@ -622,6 +622,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    document.querySelectorAll('.responsive-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const btnTarget = e.currentTarget;
+            document.querySelectorAll('.responsive-btn').forEach(b => b.classList.remove('active'));
+            btnTarget.classList.add('active');
+
+            const viewType = btnTarget.dataset.view;
+            const iframeContainer = document.getElementById('htmlPreviewFrame');
+            if (iframeContainer) {
+                iframeContainer.className = `html-preview-frame ${viewType}`;
+            }
+        });
+    });
+
     // Atajos de teclado
     document.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -1013,6 +1027,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveFileBtn.style.display = 'none';
                 document.getElementById('openHtmlBtn').style.display = 'flex';
                 document.getElementById('downloadHtmlBtn').style.display = 'flex';
+                document.getElementById('htmlResponsiveToolbar').style.display = 'flex';
                 // Si el editor estaba abierto, lo cerramos forzosamente
                 if (isEditorOpen) {
                     isEditorOpen = false;
@@ -1023,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveFileBtn.style.display = 'flex';
                 document.getElementById('openHtmlBtn').style.display = 'none';
                 document.getElementById('downloadHtmlBtn').style.display = 'none';
+                document.getElementById('htmlResponsiveToolbar').style.display = 'none';
             }
 
             if (activeTab.content) {
@@ -1106,7 +1122,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tabData.isHtml) {
                 const blob = new Blob([markdownText], { type: 'text/html' });
                 const url = URL.createObjectURL(blob);
-                tabData.content = `<iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white;"></iframe>`;
+                tabData.content = `
+                    <div class="html-preview-wrapper">
+                        <div id="htmlPreviewFrame" class="html-preview-frame desktop">
+                            <iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe>
+                        </div>
+                    </div>
+                `;
                 tabData.blobUrl = url; // Guarda la url para descarga/nueva pestaña
             } else {
                 const rawHtml = marked.parse(markdownText);
