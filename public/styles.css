@@ -276,6 +276,10 @@ body {
     filter: grayscale(0.8);
 }
 
+.file-icon.icon-html::before {
+    content: '🌐';
+}
+
 .active .file-icon::before {
     filter: none;
 }

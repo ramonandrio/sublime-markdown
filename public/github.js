@@ -74,11 +74,11 @@ const GitHubAPI = (() => {
     function buildTreeFromGitHub(flatTree, repoName) {
         const root = { name: repoName, path: '', type: 'directory', children: [] };
 
-        const mdFiles = flatTree.filter(item =>
-            item.type === 'blob' && item.path.endsWith('.md')
+        const allowedFiles = flatTree.filter(item =>
+            item.type === 'blob' && (item.path.endsWith('.md') || item.path.endsWith('.html'))
         );
 
-        for (const file of mdFiles) {
+        for (const file of allowedFiles) {
             const parts = file.path.split('/');
             let current = root;
 
@@ -151,8 +151,8 @@ const GitHubAPI = (() => {
     }
 
     async function searchCode(owner, repo, query) {
-        // Forzamos buscar solo en archivos .md de este repo
-        const q = encodeURIComponent(`${query} in:file repo:${owner}/${repo} extension:md`);
+        // Buscamos en archivos .md y .html de este repo
+        const q = encodeURIComponent(`${query} in:file repo:${owner}/${repo} extension:md extension:html`);
         return apiCall(`/search/code?q=${q}&per_page=20`);
     }
 

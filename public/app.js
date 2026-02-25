@@ -600,6 +600,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // Guardar
     saveFileBtn.addEventListener('click', () => saveActiveFile());
 
+    document.getElementById('openHtmlBtn').addEventListener('click', () => {
+        const activeTab = openTabs.find(t => t.id === activeTabId);
+        if (activeTab && activeTab.isHtml && activeTab.blobUrl) {
+            window.open(activeTab.blobUrl, '_blank');
+        }
+    });
+
+    document.getElementById('downloadHtmlBtn').addEventListener('click', () => {
+        const activeTab = openTabs.find(t => t.id === activeTabId);
+        if (activeTab && activeTab.isHtml && activeTab.rawContent) {
+            const blob = new Blob([activeTab.rawContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = activeTab.name || 'document.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    });
+
     // Atajos de teclado
     document.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -757,7 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (entry.kind === 'directory') {
                 item.children.push(await getTreeFromHandle(entry, pathPrefix + dirHandle.name + '/'));
-            } else if (entry.name.endsWith('.md')) {
+            } else if (entry.name.endsWith('.md') || entry.name.endsWith('.html')) {
                 item.children.push({
                     name: entry.name,
                     path: pathPrefix + dirHandle.name + '/' + entry.name,
@@ -875,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } else {
             const fileIcon = document.createElement('span');
-            fileIcon.className = 'file-icon icon-md';
+            fileIcon.className = item.name.endsWith('.html') ? 'file-icon icon-html' : 'file-icon icon-md';
             iconWrapper.appendChild(fileIcon);
 
             itemRow.appendChild(iconWrapper);
@@ -908,6 +930,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handle: item.handle,
                 isLocal: !!item.handle,
                 isGitHub: !!currentGitHubRepo && !item.handle,
+                isHtml: item.name.endsWith('.html'),
                 githubMeta: currentGitHubRepo ? { ...currentGitHubRepo, sha: item.sha } : null,
                 content: null,
                 rawContent: null,
@@ -983,11 +1006,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (activeTab) {
             editorToolbar.style.display = 'flex';
+
+            // Lógica de botones de la Toolbar
+            if (activeTab.isHtml) {
+                document.getElementById('toggleSplitBtn').style.display = 'none';
+                saveFileBtn.style.display = 'none';
+                document.getElementById('openHtmlBtn').style.display = 'flex';
+                document.getElementById('downloadHtmlBtn').style.display = 'flex';
+                // Si el editor estaba abierto, lo cerramos forzosamente
+                if (isEditorOpen) {
+                    isEditorOpen = false;
+                    updateEditorVisibility();
+                }
+            } else {
+                document.getElementById('toggleSplitBtn').style.display = 'flex';
+                saveFileBtn.style.display = 'flex';
+                document.getElementById('openHtmlBtn').style.display = 'none';
+                document.getElementById('downloadHtmlBtn').style.display = 'none';
+            }
+
             if (activeTab.content) {
                 markdownContent.innerHTML = activeTab.content;
                 if (isTocOpen) generateTOC();
             } else {
-                markdownContent.innerHTML = '<div class="loading-state">Cargando Markdown...</div>';
+                markdownContent.innerHTML = '<div class="loading-state">Cargando...</div>';
             }
             markdownEditor.value = activeTab.rawContent !== null ? activeTab.rawContent : '';
             // Ensure undo history is initialized for this tab
@@ -1060,8 +1102,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tabData.rawContent = markdownText;
             tabData.savedContent = markdownText;
-            const rawHtml = marked.parse(markdownText);
-            tabData.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+
+            if (tabData.isHtml) {
+                const blob = new Blob([markdownText], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                tabData.content = `<iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white;"></iframe>`;
+                tabData.blobUrl = url; // Guarda la url para descarga/nueva pestaña
+            } else {
+                const rawHtml = marked.parse(markdownText);
+                tabData.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+            }
 
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
