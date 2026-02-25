@@ -565,8 +565,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const notesPanel = document.getElementById('notesPanel');
     const toggleNotesBtn = document.getElementById('toggleNotesBtn');
     const notesTextarea = document.getElementById('notesTextarea');
-    const saveNoteBtn = document.getElementById('saveNoteBtn');
-    const deleteNoteBtn = document.getElementById('deleteNoteBtn');
     let isNotesOpen = false;
 
     toggleNotesBtn.addEventListener('click', () => {
@@ -598,25 +596,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    saveNoteBtn.addEventListener('click', async () => {
-        if (!activeTabId) return;
-        const text = notesTextarea.value.trim();
-        if (text) {
-            await WorkspaceDB.saveNote(activeTabId, text);
-            showToast('💾 Nota guardada', 'success', 2000);
-        } else {
-            await WorkspaceDB.deleteNote(activeTabId);
-            showToast('🗑️ Nota eliminada', 'info', 2000);
-        }
-        updateNotesIndicator(activeTabId);
-    });
+    let noteSaveTimeout = null;
 
-    deleteNoteBtn.addEventListener('click', async () => {
+    notesTextarea.addEventListener('input', () => {
         if (!activeTabId) return;
-        await WorkspaceDB.deleteNote(activeTabId);
-        notesTextarea.value = '';
-        showToast('🗑️ Nota eliminada', 'info', 2000);
-        updateNotesIndicator(activeTabId);
+
+        // Show saving status in the hint area
+        const hint = document.querySelector('.notes-hint');
+        if (hint) hint.innerHTML = '✍️ Guardando...';
+
+        clearTimeout(noteSaveTimeout);
+        noteSaveTimeout = setTimeout(async () => {
+            const text = notesTextarea.value.trim();
+            if (text) {
+                await WorkspaceDB.saveNote(activeTabId, text);
+                if (hint) hint.innerHTML = '🔒 Guardado automático en tu navegador';
+            } else {
+                await WorkspaceDB.deleteNote(activeTabId);
+                if (hint) hint.innerHTML = '🔒 Guardado automático en tu navegador';
+            }
+            updateNotesIndicator(activeTabId);
+        }, 500); // 500ms debounce
     });
 
     // Guardar
@@ -1108,6 +1108,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const tocList = document.getElementById('tocList');
             if (tocList) {
                 tocList.innerHTML = '<p class="toc-empty">Abre un archivo para ver su estructura.</p>';
+            }
+
+            // Hide Notes panel
+            const notesPanel = document.getElementById('notesPanel');
+            if (notesPanel) {
+                notesPanel.style.display = 'none';
+                isNotesOpen = false;
             }
         }
     }
