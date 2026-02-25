@@ -1302,8 +1302,8 @@ document.addEventListener('DOMContentLoaded', () => {
             saveFileBtn.style.color = '#ffffff';
             setTimeout(() => {
                 saveFileBtn.innerHTML = originalText;
-                saveFileBtn.style.backgroundColor = 'transparent';
-                saveFileBtn.style.color = '';
+                saveFileBtn.style.backgroundColor = 'var(--bg-selection)';
+                saveFileBtn.style.color = 'white';
             }, 1500);
 
         } catch (error) {
