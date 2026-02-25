@@ -1103,6 +1103,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             markdownEditor.value = '';
+
+            // Clear TOC
+            const tocList = document.getElementById('tocList');
+            if (tocList) {
+                tocList.innerHTML = '<p class="toc-empty">Abre un archivo para ver su estructura.</p>';
+            }
         }
     }
 
