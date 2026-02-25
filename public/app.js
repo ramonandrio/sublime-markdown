@@ -1299,9 +1299,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 ¡Guardado!
             `;
             saveFileBtn.style.backgroundColor = '#2da44e';
+            saveFileBtn.style.color = '#ffffff';
             setTimeout(() => {
                 saveFileBtn.innerHTML = originalText;
-                saveFileBtn.style.backgroundColor = '';
+                saveFileBtn.style.backgroundColor = 'transparent';
+                saveFileBtn.style.color = '';
             }, 1500);
 
         } catch (error) {
