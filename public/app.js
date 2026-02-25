@@ -197,6 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handle: t.handle,
                 isLocal: t.isLocal,
                 isGitHub: t.isGitHub,
+                isHtml: t.isHtml,
                 githubMeta: t.githubMeta,
                 content: t.content,
                 rawContent: t.rawContent,
@@ -227,6 +228,27 @@ document.addEventListener('DOMContentLoaded', () => {
             openTabs = state.openTabs || [];
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
+
+            // Regenerate Blob URLs for HTML files since they don't survive browser reloads
+            openTabs.forEach(t => {
+                // Retroactive fix for tabs saved before isHtml was added to state
+                if (t.isHtml === undefined && t.name && t.name.endsWith('.html')) {
+                    t.isHtml = true;
+                }
+
+                if (t.isHtml && t.rawContent) {
+                    const blob = new Blob([t.rawContent], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    t.content = `
+                        <div class="html-preview-wrapper">
+                            <div id="htmlPreviewFrame" class="html-preview-frame desktop">
+                                <iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe>
+                            </div>
+                        </div>
+                    `;
+                    t.blobUrl = url;
+                }
+            });
 
             showApp();
 
@@ -967,8 +989,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tabEl.style.display = 'flex';
 
             const dirtyDot = tabData.dirty ? '<span class="dirty-dot">●</span>' : '';
+            const iconClass = tabData.isHtml ? 'icon-html' : 'icon-md';
             tabEl.innerHTML = `
-                <span class="file-icon"></span>
+                <span class="file-icon ${iconClass}"></span>
                 <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}</span>${dirtyDot}
                 <button class="close-tab">×</button>
             `;
