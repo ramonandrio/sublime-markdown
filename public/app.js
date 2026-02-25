@@ -1043,6 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (activeTab) {
             editorToolbar.style.display = 'flex';
+            const previewPanel = document.getElementById('previewPanel');
 
             // Lógica de botones de la Toolbar
             if (activeTab.isHtml) {
@@ -1051,6 +1052,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('openHtmlBtn').style.display = 'flex';
                 document.getElementById('downloadHtmlBtn').style.display = 'flex';
                 document.getElementById('htmlResponsiveToolbar').style.display = 'flex';
+
+                previewPanel.style.padding = '0';
+                markdownContent.style.maxWidth = 'none';
+                markdownContent.style.height = '100%';
+                markdownContent.style.display = 'flex';
+                markdownContent.style.flexDirection = 'column';
+
                 // Si el editor estaba abierto, lo cerramos forzosamente
                 if (isEditorOpen) {
                     isEditorOpen = false;
@@ -1062,6 +1070,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('openHtmlBtn').style.display = 'none';
                 document.getElementById('downloadHtmlBtn').style.display = 'none';
                 document.getElementById('htmlResponsiveToolbar').style.display = 'none';
+
+                previewPanel.style.padding = '40px';
+                markdownContent.style.maxWidth = '';
+                markdownContent.style.height = '';
+                markdownContent.style.display = '';
             }
 
             if (activeTab.content) {
