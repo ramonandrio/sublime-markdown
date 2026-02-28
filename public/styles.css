@@ -244,8 +244,9 @@ body {
     filter: none;
 }
 
-/* Botón Nuevo Archivo (oculto por defecto) */
-.new-file-btn {
+/* Botón Nuevo Archivo y Nueva Carpeta (ocultos por defecto) */
+.new-file-btn,
+.new-folder-btn {
     display: none;
     margin-left: auto;
     background: transparent;
@@ -258,13 +259,21 @@ body {
     line-height: 1;
 }
 
-.new-file-btn:hover {
+.new-folder-btn {
+    margin-left: 0;
+    margin-right: 4px;
+    /* Space between buttons */
+}
+
+.new-file-btn:hover,
+.new-folder-btn:hover {
     color: var(--text-accent);
     background: rgba(124, 58, 237, 0.1);
 }
 
-/* Mostrar botón Nuevo Archivo al hacer hover en un directorio */
-.tree-item.directory:hover .new-file-btn {
+/* Mostrar botones al hacer hover en un directorio */
+.tree-item.directory:hover .new-file-btn,
+.tree-item.directory:hover .new-folder-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;

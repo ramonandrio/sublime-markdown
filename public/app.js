@@ -948,17 +948,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const newFolderBtn = document.createElement('button');
             newFolderBtn.className = 'new-folder-btn action-btn';
             newFolderBtn.title = 'Nueva carpeta';
-            newFolderBtn.style.padding = '2px';
-            newFolderBtn.style.marginRight = '4px';
-            newFolderBtn.style.color = 'var(--text-muted)';
             newFolderBtn.innerHTML = `
                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1m-5 14H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
             `;
-            // Hover effect matching other buttons
-            newFolderBtn.onmouseover = () => newFolderBtn.style.color = 'var(--text-primary)';
-            newFolderBtn.onmouseout = () => newFolderBtn.style.color = 'var(--text-muted)';
 
             newFolderBtn.addEventListener('click', async (e) => {
                 e.stopPropagation(); // Prevent folder expand/collapse
