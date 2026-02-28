@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isTocOpen = false;
     let currentGitHubRepo = null;
     let currentLocalFolderHandle = null;
+    let currentNodeServer = false;
     let allRepos = [];
     let expandedFolders = new Set();
 
@@ -61,6 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span>Local: ${currentLocalFolderHandle.name}</span>
             `;
             sourceIndicator.title = `Carpeta Local: ${currentLocalFolderHandle.name}`;
+        } else if (currentNodeServer) {
+            sourceIndicator.innerHTML = `
+                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
+                <span>Servidor Local</span>
+            `;
+            sourceIndicator.title = `Servidor Node Local`;
         } else if (currentGitHubRepo) {
             sourceIndicator.innerHTML = `
                 <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.379.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z"></path></svg>
@@ -182,12 +189,13 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 
     async function saveWorkspaceState() {
-        if (!currentGitHubRepo && !currentLocalFolderHandle) return;
+        if (!currentGitHubRepo && !currentLocalFolderHandle && !currentNodeServer) return;
 
         const state = {
-            type: currentGitHubRepo ? 'github' : 'local',
+            type: currentGitHubRepo ? 'github' : (currentNodeServer ? 'node' : 'local'),
             currentGitHubRepo,
             localFolderHandle: currentLocalFolderHandle,
+            currentNodeServer,
             activeTabId,
             expandedFolders: [...expandedFolders],
             openTabs: openTabs.map(t => ({
@@ -196,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 path: t.path,
                 handle: t.handle,
                 isLocal: t.isLocal,
+                isNode: t.isNode,
                 isGitHub: t.isGitHub,
                 isHtml: t.isHtml,
                 githubMeta: t.githubMeta,
@@ -221,10 +230,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function initApp() {
         const state = await WorkspaceDB.load();
-        if (state && (state.currentGitHubRepo || state.localFolderHandle)) {
+        if (state && (state.currentGitHubRepo || state.localFolderHandle || state.currentNodeServer)) {
             // Restore state
             currentGitHubRepo = state.currentGitHubRepo;
             currentLocalFolderHandle = state.localFolderHandle;
+            currentNodeServer = state.currentNodeServer || false;
             openTabs = state.openTabs || [];
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
@@ -257,11 +267,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
                 try {
                     const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+                    if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
                     fileTreeContainer.innerHTML = '';
                     fileTreeContainer.appendChild(renderTreeItem(treeData, true));
                 } catch (err) {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
                 }
+            } else if (currentNodeServer) {
+                await renderNodeFolder();
             } else if (currentLocalFolderHandle) {
                 const hasPerm = await verifyPermission(currentLocalFolderHandle, false);
                 if (hasPerm) {
@@ -297,6 +310,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function renderNodeFolder() {
+        fileTreeContainer.innerHTML = '<div class="loading-state">Cargando árbol del servidor...</div>';
+        try {
+            const res = await fetch('/api/tree');
+            if (!res.ok) throw new Error('Error al cargar árbol del servidor local');
+            const treeData = await res.json();
+            if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
+
+            // start local indexing loosely for node
+            if (typeof startNodeIndexing === 'function') startNodeIndexing(treeData);
+
+            fileTreeContainer.innerHTML = '';
+            const rootEl = renderTreeItem(treeData, true);
+            fileTreeContainer.appendChild(rootEl);
+        } catch (err) {
+            fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
+        }
+    }
+
     async function verifyPermission(fileHandle, request = false) {
         const options = { mode: 'readwrite' };
         if ((await fileHandle.queryPermission(options)) === 'granted') {
@@ -328,8 +360,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Carpeta local
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
+            // Comprobar si tenemos el servidor backend Node local corriendo (para automatizar carpetas ocultas)
+            const res = await fetch('/api/tree').catch(() => null);
+            if (res && res.ok) {
+                currentGitHubRepo = null;
+                currentLocalFolderHandle = null;
+                currentNodeServer = true;
+                showApp();
+                await renderNodeFolder();
+                saveWorkspaceState();
+                return;
+            }
+
+            // Fallback: usar File System Access API
             const dirHandle = await window.showDirectoryPicker();
             currentGitHubRepo = null;
+            currentNodeServer = false;
             currentLocalFolderHandle = dirHandle;
             showApp();
             await renderLocalFolder(dirHandle);
@@ -374,6 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
     githubLogoutBtn.addEventListener('click', () => {
         GitHubAPI.clearToken();
         currentGitHubRepo = null;
+        currentNodeServer = false;
         activeTabId = null;
         openTabs = [];
         tabHistory = {};
@@ -483,6 +530,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const dirHandle = await window.showDirectoryPicker();
                 currentGitHubRepo = null;
+                currentNodeServer = false;
                 currentLocalFolderHandle = dirHandle;
                 await renderLocalFolder(dirHandle);
                 saveWorkspaceState();
@@ -507,6 +555,7 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTabId = null;
             currentGitHubRepo = null;
             currentLocalFolderHandle = null;
+            currentNodeServer = false;
             renderTabs();
             showWelcomeScreen();
             saveWorkspaceState();
@@ -811,7 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         for await (const entry of dirHandle.values()) {
-            if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+            if (entry.name === 'node_modules') continue;
 
             if (entry.kind === 'directory') {
                 item.children.push(await getTreeFromHandle(entry, pathPrefix + dirHandle.name + '/'));
@@ -895,7 +944,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 await createNewFile(item, finalName);
             });
-            itemRow.appendChild(newFileBtn);
+
+            const newFolderBtn = document.createElement('button');
+            newFolderBtn.className = 'new-folder-btn action-btn';
+            newFolderBtn.title = 'Nueva carpeta';
+            newFolderBtn.style.padding = '2px';
+            newFolderBtn.style.marginRight = '4px';
+            newFolderBtn.style.color = 'var(--text-muted)';
+            newFolderBtn.innerHTML = `
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1m-5 14H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+            `;
+            // Hover effect matching other buttons
+            newFolderBtn.onmouseover = () => newFolderBtn.style.color = 'var(--text-primary)';
+            newFolderBtn.onmouseout = () => newFolderBtn.style.color = 'var(--text-muted)';
+
+            newFolderBtn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Prevent folder expand/collapse
+                if (currentGitHubRepo) {
+                    showToast('La creación de carpetas no está disponible en modo GitHub.', 'warning');
+                    return;
+                }
+                const folderName = prompt(`Crear nueva carpeta en ${item.name}/:\nIntroduce el nombre para la nueva carpeta:`, 'nueva-carpeta');
+                if (!folderName || !folderName.trim()) return;
+
+                await createNewFolder(item, folderName.trim());
+            });
+
+            const actionsContainer = document.createElement('div');
+            actionsContainer.style.display = 'flex';
+            actionsContainer.style.alignItems = 'center';
+            actionsContainer.appendChild(newFolderBtn);
+            actionsContainer.appendChild(newFileBtn);
+
+            itemRow.appendChild(actionsContainer);
 
             itemContainer.appendChild(itemRow);
 
@@ -965,6 +1048,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 path: item.path,
                 handle: item.handle,
                 isLocal: !!item.handle,
+                isNode: currentNodeServer,
                 isGitHub: !!currentGitHubRepo && !item.handle,
                 isHtml: item.name.endsWith('.html'),
                 githubMeta: currentGitHubRepo ? { ...currentGitHubRepo, sha: item.sha } : null,
@@ -1153,10 +1237,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let markdownText = '';
 
-            if (tabData.isLocal) {
+            if (tabData.isLocal && tabData.handle) {
                 // File System Access API
                 const file = await tabData.handle.getFile();
                 markdownText = await file.text();
+            } else if (tabData.isNode) {
+                // Node.js Backend API
+                const res = await fetch(`/api/file?path=${encodeURIComponent(tabData.path)}`);
+                if (!res.ok) throw new Error('Error al leer el archivo desde el servidor');
+                markdownText = await res.text();
             } else if (tabData.isGitHub) {
                 // GitHub API
                 const data = await GitHubAPI.getFileContent(
@@ -1259,6 +1348,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     lastTreeHash = currentHash;
                 }
+            } else if (currentNodeServer) {
+                const res = await fetch('/api/tree').catch(() => null);
+                if (res && res.ok) {
+                    const newTreeData = await res.json();
+                    const currentHash = hashTreeData(newTreeData);
+                    if (lastTreeHash !== null && lastTreeHash !== currentHash) {
+                        lastTreeHash = currentHash;
+                        fileTreeContainer.innerHTML = '';
+                        const rootEl = renderTreeItem(newTreeData, true);
+                        fileTreeContainer.appendChild(rootEl);
+                    } else {
+                        lastTreeHash = currentHash;
+                    }
+                }
             } else if (currentGitHubRepo) {
                 // Pedir el commit SHAs tree de github
                 const newTreeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
@@ -1285,6 +1388,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const diskContent = await file.text();
                     if (diskContent === tab.savedContent) continue;
                     newContent = diskContent;
+
+                } else if (tab.isNode) {
+                    const res = await fetch(`/api/file?path=${encodeURIComponent(tab.path)}`).catch(() => null);
+                    if (res && res.ok) {
+                        const diskContent = await res.text();
+                        if (diskContent === tab.savedContent) continue;
+                        newContent = diskContent;
+                    } else {
+                        continue;
+                    }
 
                 } else if (tab.isGitHub && tab.githubMeta) {
                     const data = await GitHubAPI.getFileContent(
@@ -1355,6 +1468,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 await renderLocalFolder(currentLocalFolderHandle);
 
                 showToast(`Archivo <strong>${fileName}</strong> creado localmente.`, 'success');
+            } else if (currentNodeServer) {
+                const newFilePath = folderItem.path ? `${folderItem.path}/${fileName}` : fileName;
+                const initialContent = `# ${fileName.replace('.md', '')}\n\n`;
+
+                showToast(`Creando <strong>${fileName}</strong> en el servidor local...`, 'info', 2000);
+
+                const res = await fetch('/api/file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: newFilePath,
+                        content: initialContent
+                    })
+                });
+
+                if (!res.ok) throw new Error('Error al crear archivo en el servidor local');
+
+                lastTreeHash = null;
+                await renderNodeFolder();
+
+                showToast(`Archivo <strong>${fileName}</strong> creado.`, 'success');
             } else if (currentGitHubRepo) {
                 // Es un archivo en GitHub
                 const newFilePath = folderItem.path ? `${folderItem.path}/${fileName}` : fileName;
@@ -1385,6 +1519,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function createNewFolder(folderItem, folderName) {
+        try {
+            if (currentLocalFolderHandle) {
+                // Es un archivo local (File System Access)
+                let targetDirHandle = currentLocalFolderHandle;
+
+                // Si la carpeta no es la raíz, navegar a ella
+                if (folderItem.path !== currentLocalFolderHandle.name) {
+                    const relPath = folderItem.path.substring(currentLocalFolderHandle.name.length + 1);
+                    const parts = relPath.split('/');
+                    for (const part of parts) {
+                        targetDirHandle = await targetDirHandle.getDirectoryHandle(part);
+                    }
+                }
+
+                // Crear la carpeta (getDirectoryHandle con create: true)
+                await targetDirHandle.getDirectoryHandle(folderName, { create: true });
+
+                // Refrescar el árbol
+                lastTreeHash = null;
+                await renderLocalFolder(currentLocalFolderHandle);
+
+                showToast(`Carpeta <strong>${folderName}</strong> creada localmente.`, 'success');
+
+            } else if (currentNodeServer) {
+                // Servidor Node Backend
+                const targetPath = folderItem.path ? folderItem.path : '';
+                const newFolderPath = targetPath ? `${targetPath}/${folderName}` : folderName;
+
+                const res = await fetch('/api/folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: newFolderPath })
+                });
+
+                if (!res.ok) throw new Error('Error al crear la carpeta en el servidor');
+
+                lastTreeHash = null;
+                await renderNodeFolder();
+
+                showToast(`Carpeta <strong>${folderName}</strong> creada en el servidor.`, 'success');
+            }
+        } catch (err) {
+            console.error('Error creating folder:', err);
+            showToast(`Error al crear carpeta: ${err.message}`, 'warning', 5000);
+        }
+    }
+
     // ===================================
     // GUARDADO
     // ===================================
@@ -1396,11 +1578,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const originalText = saveFileBtn.innerHTML;
 
         try {
-            if (activeTab.isLocal) {
+            if (activeTab.isLocal && activeTab.handle) {
                 // File System Access API
                 const writable = await activeTab.handle.createWritable();
                 await writable.write(activeTab.rawContent);
                 await writable.close();
+            } else if (activeTab.isNode) {
+                // Node API
+                const res = await fetch('/api/file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: activeTab.path, content: activeTab.rawContent })
+                });
+                if (!res.ok) throw new Error('Error al guardar en el servidor local');
             } else if (activeTab.isGitHub) {
                 // GitHub API — crea un commit
                 const result = await GitHubAPI.saveFile(
@@ -1823,7 +2013,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openSearchModal() {
-        if (!currentLocalFolderHandle && !currentGitHubRepo) return;
+        if (!currentLocalFolderHandle && !currentGitHubRepo && !currentNodeServer) return;
 
         if (currentGitHubRepo) {
             showToast('La búsqueda global (Cmd+P) está desactivada para repositorios GitHub.', 'warning');
@@ -1946,6 +2136,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Top 20 resultados
             currentSearchResults = results.slice(0, 20);
+            renderSearchResults();
+
+        } else if (currentNodeServer) {
+            let pathResults = [];
+            if (flatSearchPaths && flatSearchPaths.length > 0) {
+                pathResults = flatSearchPaths
+                    .filter(item => item.name.toLowerCase().includes(q) || item.path.toLowerCase().includes(q))
+                    .map(item => ({
+                        path: item.path,
+                        name: item.name,
+                        isTitleMatch: true,
+                        snippet: ''
+                    }));
+                pathResults.sort((a, b) => a.name.localeCompare(b.name));
+            }
+
+            currentSearchResults = pathResults.slice(0, 20);
             renderSearchResults();
 
         } else if (currentGitHubRepo) {

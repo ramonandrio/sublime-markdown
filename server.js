@@ -36,8 +36,8 @@ function getDirectoryTree(dirPath, basePath = '') {
     try {
         const files = fs.readdirSync(dirPath);
         for (const file of files) {
-            // Ignorar carpetas ocultas o de sistema comunes para mantenerlo limpio
-            if (file.startsWith('.') || file === 'node_modules' || file === 'markdown-viewer') {
+            // Ignorar carpetas de sistema comunes para mantenerlo limpio
+            if (file === 'node_modules' || file === 'markdown-viewer') {
                 continue;
             }
 
@@ -129,6 +129,33 @@ app.post('/api/file', (req, res) => {
     } catch (err) {
         console.error(`Error saving file ${safePath}:`, err.message);
         res.status(500).json({ error: 'Error saving file', details: err.message });
+    }
+});
+
+// API: Crear una nueva carpeta
+app.post('/api/folder', (req, res) => {
+    const folderPath = req.body.path;
+
+    if (!folderPath) {
+        return res.status(400).json({ error: 'Folder path is required' });
+    }
+
+    // Prevenir directory traversal
+    const safePath = path.resolve(ROOT_DIR, folderPath);
+    if (!safePath.startsWith(ROOT_DIR)) {
+        return res.status(403).json({ error: 'Access denied: Directory traversal detected' });
+    }
+
+    try {
+        if (!fs.existsSync(safePath)) {
+            fs.mkdirSync(safePath, { recursive: true });
+            res.json({ success: true, message: 'Folder created successfully' });
+        } else {
+            res.status(400).json({ error: 'Folder already exists' });
+        }
+    } catch (err) {
+        console.error(`Error creating folder ${safePath}:`, err.message);
+        res.status(500).json({ error: 'Error creating folder', details: err.message });
     }
 });
 
