@@ -325,6 +325,18 @@
                     </div>
                 </div>
 
+                <!-- Barra de Herramientas del Terminal -->
+                <div class="terminal-toolbar"
+                    style="padding: 6px 14px; border-bottom: 1px solid var(--border-color); display: flex; gap: 8px; background: var(--bg-tertiary); align-items: center; overflow-x: auto;">
+                    <button id="toolbarClaudeBtn" class="action-btn" title="Lanzar Claude Code interactivo"
+                        style="font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; border-radius: 4px; background: var(--bg-primary); border: 1px solid var(--border-color); cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        claude --dangerously-skip-permissions
+                    </button>
+                </div>
                 <div class="terminal-body" id="terminalBodyContainer">
                     <!-- Contenedores de scroll de chat inyectados dinámicamente según la pestaña activa -->
                 </div>

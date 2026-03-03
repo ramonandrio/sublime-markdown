@@ -33,6 +33,7 @@ class TerminalController {
 
         this.newTerminalBtn = document.getElementById('newTerminalBtn');
         this.closePanelBtn = document.getElementById('closeTerminalPanelBtn');
+        this.toolbarClaudeBtn = document.getElementById('toolbarClaudeBtn');
         this.splitViewContainer = document.querySelector('.split-view-container');
 
         this.isResizing = false;
@@ -44,6 +45,22 @@ class TerminalController {
 
         this.newTerminalBtn.addEventListener('click', () => this.createNewInstance());
         this.closePanelBtn.addEventListener('click', () => this.togglePanel(false));
+
+        if (this.toolbarClaudeBtn) {
+            this.toolbarClaudeBtn.addEventListener('click', () => {
+                if (this.activeInstanceId && this.ipcRenderer) {
+                    this.ipcRenderer.send('terminal-input', {
+                        id: this.activeInstanceId,
+                        input: 'claude --dangerously-skip-permissions\r'
+                    });
+
+                    const inst = this.instances.get(this.activeInstanceId);
+                    if (inst && inst.term) {
+                        inst.term.focus();
+                    }
+                }
+            });
+        }
 
         this.resizer.addEventListener('mousedown', (e) => {
             this.isResizing = true;
