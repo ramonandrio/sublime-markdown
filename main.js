@@ -1,29 +1,148 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('path');
+const { createServer } = require('./server.js');
 
-let mainWindow;
-let server;
+// Map to keep track of each window and its associated server
+// Format: map.set(webContentsId, { window, server })
+const windowData = new Map();
 
-function createWindow() {
-    mainWindow = new BrowserWindow({
+async function createWindow(initialDir) {
+    // Spin up a new Express server uniquely tied to this window on a random available port
+    const serverInstance = await createServer(initialDir);
+    const port = serverInstance.port || serverInstance.address().port;
+
+    const mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
         title: "SublimeOS (Sublime Markdown)",
-        titleBarStyle: 'hiddenInset', // Adds a native Mac feel
+        titleBarStyle: 'hiddenInset',
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false
         }
     });
 
-    const port = server.address().port;
+    // Register this instance
+    windowData.set(mainWindow.webContents.id, {
+        window: mainWindow,
+        server: serverInstance
+    });
+
+    mainWindow.on('closed', () => {
+        // Cleanup when this specific window is closed
+        serverInstance.close();
+        windowData.delete(mainWindow.webContents.id);
+    });
+
     mainWindow.loadURL(`http://localhost:${port}`);
+    return mainWindow;
+}
+
+// Function to get the server tied to the IPC request sender
+function getServerFromSender(webContentsId) {
+    const data = windowData.get(webContentsId);
+    return data ? data.server : null;
+}
+
+// Function to setup application menu (to allow Cmd+N for new windows)
+function setupMenu() {
+    const isMac = process.platform === 'darwin';
+    const template = [
+        ...(isMac ? [{
+            label: app.name,
+            submenu: [
+                { role: 'about' },
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+                { type: 'separator' },
+                { role: 'quit' }
+            ]
+        }] : []),
+        {
+            label: 'File',
+            submenu: [
+                {
+                    label: 'New Window',
+                    accelerator: 'CmdOrCtrl+N',
+                    click: () => createWindow()
+                },
+                isMac ? { role: 'close' } : { role: 'quit' }
+            ]
+        },
+        {
+            label: 'Edit',
+            submenu: [
+                { role: 'undo' },
+                { role: 'redo' },
+                { type: 'separator' },
+                { role: 'cut' },
+                { role: 'copy' },
+                { role: 'paste' },
+                ...(isMac ? [
+                    { role: 'pasteAndMatchStyle' },
+                    { role: 'delete' },
+                    { role: 'selectAll' },
+                    { type: 'separator' },
+                    {
+                        label: 'Speech',
+                        submenu: [
+                            { role: 'startSpeaking' },
+                            { role: 'stopSpeaking' }
+                        ]
+                    }
+                ] : [
+                    { role: 'delete' },
+                    { type: 'separator' },
+                    { role: 'selectAll' }
+                ])
+            ]
+        },
+        {
+            label: 'View',
+            submenu: [
+                { role: 'reload' },
+                { role: 'forceReload' },
+                { role: 'toggleDevTools' },
+                { type: 'separator' },
+                { role: 'resetZoom' },
+                { role: 'zoomIn' },
+                { role: 'zoomOut' },
+                { type: 'separator' },
+                { role: 'togglefullscreen' }
+            ]
+        },
+        {
+            label: 'Window',
+            submenu: [
+                { role: 'minimize' },
+                { role: 'zoom' },
+                ...(isMac ? [
+                    { type: 'separator' },
+                    { role: 'front' },
+                    { type: 'separator' },
+                    { role: 'window' }
+                ] : [
+                    { role: 'close' }
+                ])
+            ]
+        }
+    ];
+
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
 }
 
 // === TERMINAL IPC HANDLERS ===
 ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
     try {
         const terminalManager = require('./terminal-manager');
+        const senderId = event.sender.id;
+        const server = getServerFromSender(senderId);
+        
         const activeCwd = cwd || (server && server.getRootDir ? server.getRootDir() : process.env.PMOS_ROOT_DIR) || process.env.HOME;
 
         const id = terminalManager.startTerminal(
@@ -31,14 +150,16 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
             command,
             // onData: enviar output al frontend
             (id, data, type) => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-output', { id, data, type });
+                const targetWindow = windowData.get(senderId)?.window;
+                if (targetWindow && !targetWindow.isDestroyed()) {
+                    targetWindow.webContents.send('terminal-output', { id, data, type });
                 }
             },
             // onExit: notificar cierre
             (id, code) => {
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('terminal-exit', { id, code });
+                const targetWindow = windowData.get(senderId)?.window;
+                if (targetWindow && !targetWindow.isDestroyed()) {
+                    targetWindow.webContents.send('terminal-exit', { id, code });
                 }
             }
         );
@@ -64,8 +185,11 @@ ipcMain.on('terminal-resize', (event, { id, cols, rows }) => {
 });
 
 // === APP IPC HANDLERS ===
-ipcMain.handle('select-folder', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+ipcMain.handle('select-folder', async (event) => {
+    const senderId = event.sender.id;
+    const targetWindow = windowData.get(senderId)?.window;
+
+    const result = await dialog.showOpenDialog(targetWindow, {
         properties: ['openDirectory', 'createDirectory'],
         title: 'Selecciona tu base documental (Carpeta SublimeOS)',
         buttonLabel: 'Abrir en SublimeOS'
@@ -76,22 +200,17 @@ ipcMain.handle('select-folder', async () => {
     return result.filePaths[0];
 });
 
-app.whenReady().then(() => {
-    // Start with a generic directory. The frontend will override this via API
+app.whenReady().then(async () => {
+    setupMenu();
+    // Start with a generic directory. The frontend will override this via API per window.
     process.env.PMOS_ROOT_DIR = path.resolve(__dirname, '..');
-    server = require('./server.js');
+    
+    // Create initial window
+    await createWindow();
 
-    if (server.listening) {
-        createWindow();
-    } else {
-        server.on('listening', () => {
-            createWindow();
-        });
-    }
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0 && server) {
-            createWindow();
+    app.on('activate', async () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+            await createWindow();
         }
     });
 });
@@ -107,7 +226,12 @@ app.on('will-quit', () => {
         const terminalManager = require('./terminal-manager');
         terminalManager.killAll();
     } catch (e) { }
-    if (server) {
-        server.close();
-    }
+
+    // Close all dangling servers
+    windowData.forEach(data => {
+        if (data.server) {
+            try { data.server.close(); } catch(e) {}
+        }
+    });
+    windowData.clear();
 });
