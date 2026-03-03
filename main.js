@@ -8,7 +8,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
-        title: "PM-OS (Sublime Markdown)",
+        title: "SublimeOS (Sublime Markdown)",
         titleBarStyle: 'hiddenInset', // Adds a native Mac feel
         webPreferences: {
             nodeIntegration: true,
@@ -67,8 +67,8 @@ ipcMain.on('terminal-resize', (event, { id, cols, rows }) => {
 ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openDirectory', 'createDirectory'],
-        title: 'Selecciona tu base documental (Carpeta PM-OS)',
-        buttonLabel: 'Abrir en PM-OS'
+        title: 'Selecciona tu base documental (Carpeta SublimeOS)',
+        buttonLabel: 'Abrir en SublimeOS'
     });
     if (!result || result.canceled || result.filePaths.length === 0) {
         return null;

@@ -243,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
 
-            // En PM-OS nativo (Electron), los handles locales del navegador no sirven.
+            // En SublimeOS nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
             if (typeof window.require !== 'undefined' && currentLocalFolderHandle) {
                 currentLocalFolderHandle = null;
@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
                 }
             } else if (currentNodeServer) {
-                // Si estamos en PM-OS (Electron nativo)
+                // Si estamos en SublimeOS (Electron nativo)
                 if (typeof window.require !== 'undefined') {
                     const lastFolder = localStorage.getItem('pmos_last_folder');
                     if (lastFolder) {
@@ -400,7 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Carpeta local
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
-            // 1. Detección primero para PM-OS (Electron)
+            // 1. Detección primero para SublimeOS (Electron)
             if (typeof window.require !== 'undefined') {
                 const { ipcRenderer } = window.require('electron');
                 const folderPath = await ipcRenderer.invoke('select-folder');
@@ -424,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     saveWorkspaceState();
                     return;
                 } else {
-                    alert('Error al establecer la carpeta en PM-OS. Comprueba los permisos.');
+                    alert('Error al establecer la carpeta en SublimeOS. Comprueba los permisos.');
                     return;
                 }
             }
@@ -608,7 +608,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openFolderBtn) {
         openFolderBtn.addEventListener('click', async () => {
             try {
-                // 1. Detección primero para PM-OS (Electron)
+                // 1. Detección primero para SublimeOS (Electron)
                 if (typeof window.require !== 'undefined') {
                     const { ipcRenderer } = window.require('electron');
                     const folderPath = await ipcRenderer.invoke('select-folder');
@@ -632,7 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         saveWorkspaceState();
                         return;
                     } else {
-                        alert('Error al establecer la carpeta en PM-OS. Comprueba los permisos.');
+                        alert('Error al establecer la carpeta en SublimeOS. Comprueba los permisos.');
                         return;
                     }
                 }

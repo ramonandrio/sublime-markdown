@@ -199,7 +199,7 @@ class TerminalController {
 
     async createNewInstance() {
         if (!this.ipcRenderer || !Terminal) {
-            alert('Las terminales reales solo están disponibles en modo nativo (PM-OS).');
+            alert('Las terminales reales solo están disponibles en modo nativo (SublimeOS).');
             return;
         }
 

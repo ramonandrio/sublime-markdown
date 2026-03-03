@@ -162,7 +162,7 @@ app.post('/api/folder', (req, res) => {
     }
 });
 
-// API: Set ROOT_DIR dynamically (Para PM-OS Electron)
+// API: Set ROOT_DIR dynamically (Para SublimeOS Electron)
 app.post('/api/set-root', (req, res) => {
     const { newRoot } = req.body;
     if (!newRoot || !fs.existsSync(newRoot) || !fs.statSync(newRoot).isDirectory()) {
