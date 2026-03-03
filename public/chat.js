@@ -34,6 +34,7 @@ class TerminalController {
         this.newTerminalBtn = document.getElementById('newTerminalBtn');
         this.closePanelBtn = document.getElementById('closeTerminalPanelBtn');
         this.toolbarClaudeBtn = document.getElementById('toolbarClaudeBtn');
+        this.toolbarSkillsBtn = document.getElementById('toolbarSkillsBtn');
         this.splitViewContainer = document.querySelector('.split-view-container');
 
         this.isResizing = false;
@@ -55,20 +56,38 @@ class TerminalController {
                     if (!inst.isClaudeActive) {
                         this.ipcRenderer.send('terminal-input', {
                             id: this.activeInstanceId,
-                            input: 'claude --dangerously-skip-permissions\r'
+                            input: 'claude --dangerously-skip-permissions'
                         });
                         inst.isClaudeActive = true;
                     } else {
                         // If claude is running, send the /exit command
                         this.ipcRenderer.send('terminal-input', {
                             id: this.activeInstanceId,
-                            input: '/exit\r'
+                            input: '/exit'
                         });
                         inst.isClaudeActive = false;
                     }
 
                     this.updateClaudeBtnUI();
 
+                    if (inst.term) {
+                        inst.term.focus();
+                    }
+                }
+            });
+        }
+        
+        if (this.toolbarSkillsBtn) {
+            this.toolbarSkillsBtn.addEventListener('click', () => {
+                if (this.activeInstanceId && this.ipcRenderer) {
+                    const inst = this.instances.get(this.activeInstanceId);
+                    if (!inst || !inst.isClaudeActive) return;
+
+                    this.ipcRenderer.send('terminal-input', {
+                        id: this.activeInstanceId,
+                        input: '/skills'
+                    });
+                    
                     if (inst.term) {
                         inst.term.focus();
                     }
@@ -343,12 +362,20 @@ class TerminalController {
                     Terminar Claude
                 `;
                 this.toolbarClaudeBtn.style.color = 'var(--text-color)';
+                
+                if (this.toolbarSkillsBtn) {
+                    this.toolbarSkillsBtn.style.display = 'flex';
+                }
             } else {
                 this.toolbarClaudeBtn.innerHTML = `
                     <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                     Arrancar Claude
                 `;
                 this.toolbarClaudeBtn.style.color = 'var(--text-color)';
+                
+                if (this.toolbarSkillsBtn) {
+                    this.toolbarSkillsBtn.style.display = 'none';
+                }
             }
         }
     }
