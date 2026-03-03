@@ -62,7 +62,7 @@ function createServer(initialDir) {
         return item;
     }
 
-    app.get('/api/files', (req, res) => {
+    app.get('/api/tree', (req, res) => {
         try {
             const tree = getDirectoryTree(ROOT_DIR);
             res.json(tree);
