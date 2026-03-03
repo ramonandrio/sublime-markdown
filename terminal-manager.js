@@ -24,7 +24,13 @@ class TerminalManager {
         const mergedPath = `${envPath}:${extraPaths}`;
         const processEnv = { ...process.env, PATH: mergedPath, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
 
-        const ptyProcess = pty.spawn(shell, [], {
+        const isMac = os.platform() === 'darwin';
+        let args = [];
+        if (isMac || os.platform() === 'linux') {
+            args = ['-l']; // login shell
+        }
+
+        const ptyProcess = pty.spawn(shell, args, {
             name: 'xterm-256color',
             cols: 80,
             rows: 24,
