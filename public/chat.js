@@ -56,11 +56,11 @@ class TerminalController {
                     if (!inst.isClaudeActive) {
                         this.ipcRenderer.send('terminal-input', {
                             id: this.activeInstanceId,
-                            input: 'claude --dangerously-skip-permissions'
+                            input: 'claude --dangerously-skip-permissions\r'
                         });
                         inst.isClaudeActive = true;
                     } else {
-                        // If claude is running, send the /exit command
+                        // If claude is running, send the /exit command but wait for user to hit enter
                         this.ipcRenderer.send('terminal-input', {
                             id: this.activeInstanceId,
                             input: '/exit'
