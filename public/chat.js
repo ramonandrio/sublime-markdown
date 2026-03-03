@@ -49,13 +49,27 @@ class TerminalController {
         if (this.toolbarClaudeBtn) {
             this.toolbarClaudeBtn.addEventListener('click', () => {
                 if (this.activeInstanceId && this.ipcRenderer) {
-                    this.ipcRenderer.send('terminal-input', {
-                        id: this.activeInstanceId,
-                        input: 'claude --dangerously-skip-permissions\r'
-                    });
-
                     const inst = this.instances.get(this.activeInstanceId);
-                    if (inst && inst.term) {
+                    if (!inst) return;
+
+                    if (!inst.isClaudeActive) {
+                        this.ipcRenderer.send('terminal-input', {
+                            id: this.activeInstanceId,
+                            input: 'claude --dangerously-skip-permissions\r'
+                        });
+                        inst.isClaudeActive = true;
+                    } else {
+                        // If claude is running, send the /exit command
+                        this.ipcRenderer.send('terminal-input', {
+                            id: this.activeInstanceId,
+                            input: '/exit\r'
+                        });
+                        inst.isClaudeActive = false;
+                    }
+
+                    this.updateClaudeBtnUI();
+
+                    if (inst.term) {
                         inst.term.focus();
                     }
                 }
@@ -290,7 +304,7 @@ class TerminalController {
         });
         resizeObserver.observe(domBody);
 
-        this.instances.set(id, { id, tabBtn, domBody, term, fitAddon, resizeObserver });
+        this.instances.set(id, { id, tabBtn, domBody, term, fitAddon, resizeObserver, isClaudeActive: false });
     }
 
     setActiveInstance(id) {
@@ -312,6 +326,29 @@ class TerminalController {
             } else {
                 inst.tabBtn.classList.remove('active');
                 inst.domBody.style.display = 'none';
+            }
+        }
+
+        this.updateClaudeBtnUI();
+    }
+
+    updateClaudeBtnUI() {
+        if (!this.toolbarClaudeBtn || !this.activeInstanceId) return;
+
+        const inst = this.instances.get(this.activeInstanceId);
+        if (inst) {
+            if (inst.isClaudeActive) {
+                this.toolbarClaudeBtn.innerHTML = `
+                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    Terminar Claude
+                `;
+                this.toolbarClaudeBtn.style.color = 'var(--text-color)';
+            } else {
+                this.toolbarClaudeBtn.innerHTML = `
+                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Arrancar Claude
+                `;
+                this.toolbarClaudeBtn.style.color = 'var(--text-color)';
             }
         }
     }
