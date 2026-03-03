@@ -1,4 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
+    if (typeof window.require !== 'undefined') {
+        document.body.classList.add('electron-mode');
+    }
+
     // --- ELEMENTOS DEL DOM ---
     const welcomeScreen = document.getElementById('welcomeScreen');
     const appContainer = document.getElementById('appContainer');
@@ -239,6 +243,13 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
 
+            // En PM-OS nativo (Electron), los handles locales del navegador no sirven.
+            // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
+            if (typeof window.require !== 'undefined' && currentLocalFolderHandle) {
+                currentLocalFolderHandle = null;
+                openTabs = []; // Evitamos pestañas rotas de sesiones pasadas
+            }
+
             // Regenerate Blob URLs for HTML files since they don't survive browser reloads
             openTabs.forEach(t => {
                 // Retroactive fix for tabs saved before isHtml was added to state
@@ -260,10 +271,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            showApp();
+            // Mover showApp() dentro de cada condición para asegurar que solo se muestra si la restauración es exitosa
+            // showApp(); // <- QUITAR ESTO DE AQUÍ GENERAL.
 
             // Render Sidebar
             if (currentGitHubRepo) {
+                showApp();
                 fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
                 try {
                     const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
@@ -274,8 +287,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
                 }
             } else if (currentNodeServer) {
-                await renderNodeFolder();
+                // Si estamos en PM-OS (Electron nativo)
+                if (typeof window.require !== 'undefined') {
+                    const lastFolder = localStorage.getItem('pmos_last_folder');
+                    if (lastFolder) {
+                        try {
+                            const res = await fetch('/api/set-root', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ newRoot: lastFolder })
+                            });
+                            if (res.ok) {
+                                showApp();
+                                await renderNodeFolder();
+                            } else {
+                                currentNodeServer = false; // Falló la restauración (no existe la ruta)
+                            }
+                        } catch (e) {
+                            currentNodeServer = false;
+                        }
+                    } else {
+                        currentNodeServer = false;
+                    }
+                } else {
+                    // Si estamos en modo web sirviendo con node server.js tradicional
+                    showApp();
+                    await renderNodeFolder();
+                }
             } else if (currentLocalFolderHandle) {
+                showApp(); // Mostrar app primero para enseñar el botón de restaurar si hiciera falta
                 const hasPerm = await verifyPermission(currentLocalFolderHandle, false);
                 if (hasPerm) {
                     await renderLocalFolder(currentLocalFolderHandle);
@@ -360,7 +400,36 @@ document.addEventListener('DOMContentLoaded', () => {
     // Carpeta local
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
-            // Comprobar si tenemos el servidor backend Node local corriendo (para automatizar carpetas ocultas)
+            // 1. Detección primero para PM-OS (Electron)
+            if (typeof window.require !== 'undefined') {
+                const { ipcRenderer } = window.require('electron');
+                const folderPath = await ipcRenderer.invoke('select-folder');
+
+                if (!folderPath) return; // Usuario canceló el popup nativo de Mac
+
+                // Notificar al backend de la nueva ruta elegida
+                const res = await fetch('/api/set-root', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newRoot: folderPath })
+                });
+
+                if (res.ok) {
+                    currentGitHubRepo = null;
+                    currentLocalFolderHandle = null;
+                    currentNodeServer = true;
+                    localStorage.setItem('pmos_last_folder', folderPath);
+                    showApp();
+                    await renderNodeFolder();
+                    saveWorkspaceState();
+                    return;
+                } else {
+                    alert('Error al establecer la carpeta en PM-OS. Comprueba los permisos.');
+                    return;
+                }
+            }
+
+            // 2. Comprobar si tenemos el servidor backend Node local corriendo de fondo (Web Mode)
             const res = await fetch('/api/tree').catch(() => null);
             if (res && res.ok) {
                 currentGitHubRepo = null;
@@ -372,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Fallback: usar File System Access API
+            // 3. Fallback final: usar File System Access API nativa (Web Browser Mode)
             const dirHandle = await window.showDirectoryPicker();
             currentGitHubRepo = null;
             currentNodeServer = false;
@@ -523,11 +592,52 @@ document.addEventListener('DOMContentLoaded', () => {
     // BOTONES DE LA APP PRINCIPAL
     // ===================================
 
+    // Abrir Terminal (Solo Electron)
+    const openTerminalMenuBtn = document.getElementById('openTerminalMenuBtn');
+    if (openTerminalMenuBtn && typeof window.require !== 'undefined') {
+        openTerminalMenuBtn.style.display = 'block';
+        openTerminalMenuBtn.addEventListener('click', () => {
+            if (window.terminalCtrl) {
+                window.terminalCtrl.openTerminal();
+            }
+        });
+    }
+
     // Abrir carpeta local (desde dentro de la app)
     const openFolderBtn = document.getElementById('openFolderBtn');
     if (openFolderBtn) {
         openFolderBtn.addEventListener('click', async () => {
             try {
+                // 1. Detección primero para PM-OS (Electron)
+                if (typeof window.require !== 'undefined') {
+                    const { ipcRenderer } = window.require('electron');
+                    const folderPath = await ipcRenderer.invoke('select-folder');
+
+                    if (!folderPath) return; // Usuario canceló el popup nativo de Mac
+
+                    // Notificar al backend de la nueva ruta elegida
+                    const res = await fetch('/api/set-root', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ newRoot: folderPath })
+                    });
+
+                    if (res.ok) {
+                        currentGitHubRepo = null;
+                        currentLocalFolderHandle = null;
+                        currentNodeServer = true;
+                        localStorage.setItem('pmos_last_folder', folderPath);
+                        showApp();
+                        await renderNodeFolder();
+                        saveWorkspaceState();
+                        return;
+                    } else {
+                        alert('Error al establecer la carpeta en PM-OS. Comprueba los permisos.');
+                        return;
+                    }
+                }
+
+                // 2. Fallback final: Web Browser Mode
                 const dirHandle = await window.showDirectoryPicker();
                 currentGitHubRepo = null;
                 currentNodeServer = false;
@@ -2263,5 +2373,14 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         openFile(fakeItem);
     }
+
+    // Expose app controller to other scripts (like chat.js)
+    window.appCtrl = {
+        getActiveTabName: () => {
+            if (!activeTabId) return null;
+            const tab = openTabs.find(t => t.id === activeTabId);
+            return tab ? tab.name : null;
+        }
+    };
 
 });

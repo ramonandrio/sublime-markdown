@@ -1410,3 +1410,221 @@ body {
     font-size: 0.7rem;
     box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
 }
+
+/* =========================================
+   PM-OS (ELECTRON NATIVE) MAC STYLES
+   ========================================= */
+.electron-mode .sidebar-header {
+    padding-top: 38px;
+    -webkit-app-region: drag;
+}
+
+.electron-mode .sidebar-header .action-btn,
+.electron-mode .sidebar-header h2 {
+    -webkit-app-region: no-drag;
+}
+
+.electron-mode .content-header {
+    padding-top: 24px;
+    -webkit-app-region: drag;
+}
+
+.electron-mode .content-header .tabs,
+.electron-mode .content-header .editor-toolbar {
+    -webkit-app-region: no-drag;
+}
+
+.electron-mode .sidebar-toggle {
+    padding-top: 38px;
+    -webkit-app-region: drag;
+}
+
+/* =========================================
+   PM-OS TERMINAL CHAT (FASE 2)
+   ========================================= */
+
+.horizontal-resizer {
+    height: 4px;
+    background-color: var(--border-color);
+    cursor: row-resize;
+    z-index: 10;
+    transition: background-color 0.2s;
+}
+
+.horizontal-resizer:hover,
+.horizontal-resizer.is-resizing {
+    background-color: var(--text-accent);
+}
+
+.bottom-terminal-panel {
+    display: flex;
+    flex-direction: column;
+    height: 300px;
+    /* Altura inicial por defecto */
+    min-height: 100px;
+    background-color: var(--bg-darker);
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.terminal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: var(--border-color);
+    /* Ligero gris cabecera */
+    padding: 0 8px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.terminal-tabs {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.terminal-tab {
+    padding: 0 12px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    border-right: 1px solid rgba(0, 0, 0, 0.05);
+    background-color: transparent;
+    cursor: pointer;
+    user-select: none;
+    border-top: 2px solid transparent;
+}
+
+.terminal-tab:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+.terminal-tab.active {
+    background-color: var(--bg-darker);
+    color: var(--text-primary);
+    font-weight: 500;
+    border-top-color: var(--text-accent);
+}
+
+.terminal-tab-close {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.5;
+    transition: background 0.2s, opacity 0.2s;
+}
+
+.terminal-tab-close:hover {
+    background-color: rgba(0, 0, 0, 0.1);
+    opacity: 1;
+}
+
+.terminal-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.terminal-body {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--bg-dark);
+}
+
+.terminal-view {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.chat-bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.chat-bubble.user {
+    align-self: flex-end;
+    background-color: var(--bg-selection);
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.chat-bubble.system {
+    align-self: flex-start;
+    background-color: var(--bg-darker);
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+    border: 1px solid var(--border-color);
+}
+
+/* Parseo Markdown de Claude en Burbujas */
+.chat-bubble.system pre,
+.chat-bubble.system code {
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+}
+
+.chat-bubble.system pre {
+    padding: 8px;
+    margin: 8px 0;
+    overflow-x: auto;
+}
+
+.terminal-input-area {
+    padding: 12px;
+    background-color: var(--bg-darker);
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.terminal-textarea {
+    width: 100%;
+    min-height: 38px;
+    max-height: 150px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    font-family: var(--font-ui);
+    font-size: 0.85rem;
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.terminal-textarea:focus {
+    border-color: var(--text-accent);
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.2);
+}
+
+.terminal-textarea:disabled {
+    background-color: #f1f1f1;
+    cursor: not-allowed;
+    opacity: 0.7;
+}

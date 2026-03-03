@@ -8,10 +8,11 @@ const PORT = process.env.PORT || 3000;
 // Configurar el directorio raíz que queremos explorar.
 // Por defecto es el directorio padre, pero se puede pasar por argumento CLI.
 // Ejemplo: node server.js /ruta/a/mi/carpeta
-let ROOT_DIR = path.resolve(__dirname, '..');
-if (process.argv[2]) {
+let ROOT_DIR = process.env.PMOS_ROOT_DIR || path.resolve(__dirname, '..');
+if (process.argv[2] && !process.argv[2].startsWith('--')) {
     ROOT_DIR = path.resolve(process.cwd(), process.argv[2]);
 }
+
 
 // Verificar que el directorio existe
 if (!fs.existsSync(ROOT_DIR) || !fs.statSync(ROOT_DIR).isDirectory()) {
@@ -20,6 +21,8 @@ if (!fs.existsSync(ROOT_DIR) || !fs.statSync(ROOT_DIR).isDirectory()) {
 }
 // Servir archivos estáticos del frontend
 app.use(express.static(path.join(__dirname, 'public')));
+// Servir node_modules para que el frontend pueda cargar xterm.css
+app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
 // Middleware para parsear JSON bodies
 app.use(express.json());
 
@@ -159,8 +162,22 @@ app.post('/api/folder', (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+// API: Set ROOT_DIR dynamically (Para PM-OS Electron)
+app.post('/api/set-root', (req, res) => {
+    const { newRoot } = req.body;
+    if (!newRoot || !fs.existsSync(newRoot) || !fs.statSync(newRoot).isDirectory()) {
+        return res.status(400).json({ error: 'Directorio inválido o inexistente' });
+    }
+    ROOT_DIR = newRoot;
+    res.json({ success: true, rootDir: ROOT_DIR });
+});
+
+const server = app.listen(PORT, () => {
     console.log(`Markdown Viewer server running at:`);
     console.log(`- http://localhost:${PORT}`);
     console.log(`- Targeting directory: ${ROOT_DIR}`);
+});
+
+module.exports = Object.assign(server, {
+    getRootDir: () => ROOT_DIR
 });

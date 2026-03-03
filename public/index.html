@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sublime Markdown</title>
-    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="icon" type="image/png" href="/icon.png">
 
     <!-- Fuentes Modernas -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,8 +17,11 @@
     <!-- Tema de resaltado de código estilo GitHub Claro -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 
+    <!-- Xterm CSS -->
+    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css">
+
     <!-- Estilos propios -->
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
 </head>
 
 <body>
@@ -26,7 +29,7 @@
     <div id="welcomeScreen" class="welcome-overlay">
         <div class="welcome-card">
             <h1 class="welcome-title" style="display: flex; align-items: center; justify-content: center; gap: 12px;">
-                <img src="/favicon.png" alt="" width="36" height="36" style="border-radius: 6px;"> Sublime Markdown
+                <img src="/icon.png" alt="" width="36" height="36" style="border-radius: 6px;"> Sublime Markdown
             </h1>
             <p class="welcome-subtitle">Elige una fuente de archivos para comenzar</p>
 
@@ -110,20 +113,28 @@
             <div class="sidebar-header">
                 <div>
                     <h2 style="display: flex; align-items: center; gap: 6px;">
-                        <img src="/favicon.png" alt="" width="18" height="18" style="border-radius: 3px;">
+                        <img src="/icon.png" alt="" width="18" height="18" style="border-radius: 3px;">
                         SUBLIME MARKDOWN
                     </h2>
                     <div id="sourceIndicator" class="source-indicator"></div>
                 </div>
                 <div style="display: flex; gap: 4px;">
-                    <button id="openFolderBtn" class="action-btn desktop-only" title="Abrir carpeta local">
+                    <button id="openTerminalMenuBtn" class="action-btn desktop-only" title="Abrir Chat de Terminal"
+                        style="display: none;">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+                            </path>
+                        </svg>
+                    </button>
+                    <button id="openFolderBtn" class="action-btn desktop-only" title="Cambiar carpeta local">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
                             </path>
                         </svg>
                     </button>
-                    <button id="homeBtn" class="action-btn" title="Volver a la pantalla de inicio">
+                    <button id="homeBtn" class="action-btn" title="Desconectar y volver a explorar">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">
@@ -254,7 +265,7 @@
                     style="flex: 1; overflow-y: auto; padding: 40px; display: flex; justify-content: center;">
                     <div id="markdownContent" class="markdown-body">
                         <div class="welcome-screen">
-                            <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/favicon.png" alt=""
+                            <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/icon.png" alt=""
                                     width="28" height="28" style="border-radius: 5px;"> Sublime Markdown</h1>
                             <p>Selecciona un archivo <code>.md</code> del panel izquierdo para comenzar.</p>
                         </div>
@@ -285,6 +296,43 @@
                         </div>
                     </div>
                 </aside>
+            </div>
+
+            <!-- Resizer Horizontal para el Terminal -->
+            <div id="horizontalResizer" class="horizontal-resizer" style="display: none;"></div>
+
+            <!-- Panel Inferior: Terminal / Chat AI -->
+            <div id="bottomTerminalPanel" class="bottom-terminal-panel" style="display: none;">
+                <div class="terminal-header">
+                    <div class="terminal-tabs" id="terminalTabsContainer">
+                        <!-- Pestañas de instancias inyectadas dinámicamente -->
+                    </div>
+                    <div class="terminal-actions">
+                        <button id="newTerminalBtn" class="action-btn" title="Nueva Instancia de Terminal"
+                            style="padding: 4px;">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 4v16m8-8H4"></path>
+                            </svg>
+                        </button>
+                        <button id="closeTerminalPanelBtn" class="action-btn" title="Cerrar Panel"
+                            style="padding: 4px;">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="terminal-body" id="terminalBodyContainer">
+                    <!-- Contenedores de scroll de chat inyectados dinámicamente según la pestaña activa -->
+                </div>
+
+                <div class="terminal-input-area" style="display: none;">
+                    <textarea id="terminalInput" class="terminal-textarea"
+                        placeholder="Envía un comando o pulsa Enter..." rows="1" disabled></textarea>
+                </div>
             </div>
         </main>
     </div>
@@ -319,8 +367,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
     <!-- Módulos de la aplicación -->
-    <script src="github.js"></script>
-    <script src="app.js"></script>
+    <script src="github.js?v=2"></script>
+    <script src="chat.js?v=2"></script>
+    <script src="app.js?v=2"></script>
 
 </body>
 
