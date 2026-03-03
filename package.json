@@ -10,8 +10,8 @@
     "build:mac": "electron-builder -m"
   },
   "build": {
-    "appId": "com.ramonandrio.pm-os",
-    "productName": "PM-OS",
+    "appId": "com.ramonandrio.sublime-os",
+    "productName": "SublimeOS",
     "mac": {
       "category": "public.app-category.productivity",
       "identity": null,
