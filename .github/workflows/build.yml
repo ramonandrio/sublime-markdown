@@ -18,11 +18,20 @@ jobs:
           node-version: "20"
           cache: "npm"
 
+      - name: Install Python (required for node-pty native compilation)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Install dependencies
         run: npm install
+        env:
+          npm_config_msvs_version: "2022"
 
       - name: Build Windows installer
         run: npm run build:win
+        env:
+          npm_config_msvs_version: "2022"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
