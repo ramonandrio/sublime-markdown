@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Welcome screen
     const welcomeLocalBtn = document.getElementById('welcomeLocalBtn');
     const welcomeGitHubBtn = document.getElementById('welcomeGitHubBtn');
+    const welcomeCompassAIBtn = document.getElementById('welcomeCompassAIBtn');
     const githubRepoSelector = document.getElementById('githubRepoSelector');
     const githubUserInfo = document.getElementById('githubUserInfo');
     const repoSearchInput = document.getElementById('repoSearchInput');
@@ -57,6 +58,53 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSearchResults = [];
     let isIndexing = false;
 
+    function showCustomPrompt(message, defaultValue) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('customPromptModal');
+            const title = document.getElementById('customPromptTitle');
+            const input = document.getElementById('customPromptInput');
+            const btnOk = document.getElementById('customPromptOk');
+            const btnCancel = document.getElementById('customPromptCancel');
+
+            if (!modal) {
+                const res = prompt(message, defaultValue);
+                resolve(res);
+                return;
+            }
+
+            title.textContent = message;
+            input.value = defaultValue || '';
+            modal.style.display = 'flex';
+            setTimeout(() => input.focus(), 50);
+
+            const cleanup = () => {
+                btnOk.removeEventListener('click', onOk);
+                btnCancel.removeEventListener('click', onCancel);
+                input.removeEventListener('keydown', onKey);
+                modal.style.display = 'none';
+            };
+
+            const onOk = () => {
+                cleanup();
+                resolve(input.value);
+            };
+
+            const onCancel = () => {
+                cleanup();
+                resolve(null);
+            };
+
+            const onKey = (e) => {
+                if (e.key === 'Enter') onOk();
+                if (e.key === 'Escape') onCancel();
+            };
+
+            btnOk.addEventListener('click', onOk);
+            btnCancel.addEventListener('click', onCancel);
+            input.addEventListener('keydown', onKey);
+        });
+    }
+
     function updateSourceIndicator() {
         if (!sourceIndicator) return;
 
@@ -85,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Undo/Redo: historial por tab { tabId: { undoStack: [], redoStack: [] } }
-    const tabHistory = {};
+    let tabHistory = {};
     let historyTimer = null;
 
     // Configurar Marked.js
@@ -243,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
 
-            // En SublimeOS nativo (Electron), los handles locales del navegador no sirven.
+            // En CompassAI nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
             if (typeof window.require !== 'undefined' && currentLocalFolderHandle) {
                 currentLocalFolderHandle = null;
@@ -287,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
                 }
             } else if (currentNodeServer) {
-                // Si estamos en SublimeOS (Electron nativo)
+                // Si estamos en CompassAI (Electron nativo)
                 if (typeof window.require !== 'undefined') {
                     const lastFolder = localStorage.getItem('pmos_last_folder');
                     if (lastFolder) {
@@ -301,13 +349,31 @@ document.addEventListener('DOMContentLoaded', () => {
                                 showApp();
                                 await renderNodeFolder();
                             } else {
-                                currentNodeServer = false; // Falló la restauración (no existe la ruta)
+                                // La ruta ya no existe: limpiar estado para no reintentar en cada recarga
+                                currentNodeServer = false;
+                                openTabs = [];
+                                activeTabId = null;
+                                localStorage.removeItem('pmos_last_folder');
+                                await saveWorkspaceState();
+                                showWelcomeScreen();
+                                return;
                             }
                         } catch (e) {
+                            // Error de red u otro: ídem, limpiar y mostrar bienvenida
                             currentNodeServer = false;
+                            openTabs = [];
+                            activeTabId = null;
+                            localStorage.removeItem('pmos_last_folder');
+                            await saveWorkspaceState();
+                            showWelcomeScreen();
+                            return;
                         }
                     } else {
+                        // No hay carpeta guardada: limpiar y mostrar bienvenida
                         currentNodeServer = false;
+                        await saveWorkspaceState();
+                        showWelcomeScreen();
+                        return;
                     }
                 } else {
                     // Si estamos en modo web sirviendo con node server.js tradicional
@@ -400,7 +466,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Carpeta local
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
-            // 1. Detección primero para SublimeOS (Electron)
+            // 1. Detección primero para CompassAI (Electron)
             if (typeof window.require !== 'undefined') {
                 const { ipcRenderer } = window.require('electron');
                 const folderPath = await ipcRenderer.invoke('select-folder');
@@ -424,7 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     saveWorkspaceState();
                     return;
                 } else {
-                    alert('Error al establecer la carpeta en SublimeOS. Comprueba los permisos.');
+                    alert('Error al establecer la carpeta en CompassAI. Comprueba los permisos.');
                     return;
                 }
             }
@@ -466,6 +532,95 @@ document.addEventListener('DOMContentLoaded', () => {
             tokenInput.focus();
         }
     });
+
+    // CompassAI
+    if (welcomeCompassAIBtn) {
+        welcomeCompassAIBtn.addEventListener('click', async () => {
+            const workspaceName = await showCustomPrompt('Nombre del workspace (carpeta):', 'CompassAI');
+            if (!workspaceName) return;
+
+            if (typeof window.require !== 'undefined') {
+                // Modo Electron (Nativo)
+                const { ipcRenderer } = window.require('electron');
+                const result = await ipcRenderer.invoke('create-compassai-workspace', workspaceName);
+
+                if (!result.success) {
+                    if (result.error !== 'Cancelado por el usuario') {
+                        alert('Error: ' + result.error);
+                    }
+                    return;
+                }
+
+                await applyNewWorkspace(result.path);
+            } else {
+                // Modo Web (Fallback al backend normal)
+                try {
+                    const res = await fetch('/api/create-compassai-workspace', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ workspaceName })
+                    });
+
+                    const data = await res.json();
+
+                    if (res.ok && data.success) {
+                        await applyNewWorkspace(data.path);
+                    } else {
+                        alert('Error: ' + (data.error || 'Fallo desconocido'));
+                    }
+                } catch (err) {
+                    alert('Error de red al crear workspace: ' + err.message);
+                }
+            }
+        });
+    }
+
+    async function applyNewWorkspace(targetFolder) {
+        // Set as current folder
+        const res = await fetch('/api/set-root', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newRoot: targetFolder })
+        });
+
+        if (res.ok) {
+            currentGitHubRepo = null;
+            currentLocalFolderHandle = null;
+            currentNodeServer = true;
+            localStorage.setItem('pmos_last_folder', targetFolder);
+            showApp();
+            await renderNodeFolder();
+            saveWorkspaceState();
+
+            // Abrir automáticamente START-HERE.md
+            setTimeout(() => {
+                const fakeItem = {
+                    path: 'START-HERE.md',
+                    name: 'START-HERE.md',
+                    type: 'file'
+                };
+                openFileTab(fakeItem);
+            }, 300);
+
+            setTimeout(() => {
+                if (window.terminalCtrl && window.terminalCtrl.openTerminal) {
+                    // Abrir terminal y enviar el comando inicial de setup
+                    window.terminalCtrl.openTerminal();
+                    // Dar un pequeño margen para que el terminal se renderice y esté listo
+                    setTimeout(() => {
+                        const activeId = window.terminalCtrl.getActiveTerminalId();
+                        if (activeId) {
+                            window.terminalCtrl.sendInput(activeId, '/setup\r');
+                        }
+                    }, 1000);
+                } else {
+                    alert('Workspace creado. Abre el terminal de la app y ejecuta /setup para empezar.');
+                }
+            }, 500);
+        } else {
+            alert('Error al establecer la carpeta en CompassAI.');
+        }
+    }
 
     // Guardar Token
     saveTokenBtn.addEventListener('click', async () => {
@@ -608,7 +763,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (openFolderBtn) {
         openFolderBtn.addEventListener('click', async () => {
             try {
-                // 1. Detección primero para SublimeOS (Electron)
+                // 1. Detección primero para CompassAI (Electron)
                 if (typeof window.require !== 'undefined') {
                     const { ipcRenderer } = window.require('electron');
                     const folderPath = await ipcRenderer.invoke('select-folder');
@@ -632,7 +787,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         saveWorkspaceState();
                         return;
                     } else {
-                        alert('Error al establecer la carpeta en SublimeOS. Comprueba los permisos.');
+                        alert('Error al establecer la carpeta en CompassAI. Comprueba los permisos.');
                         return;
                     }
                 }
@@ -1132,6 +1287,16 @@ document.addEventListener('DOMContentLoaded', () => {
             itemRow.appendChild(label);
             itemContainer.appendChild(itemRow);
 
+            // Make file items draggable for terminal attachment
+            itemRow.draggable = true;
+            itemRow.addEventListener('dragstart', (e) => {
+                const rootDir = localStorage.getItem('pmos_last_folder') || '';
+                const relativePath = item.path || item.name;
+                const absolutePath = rootDir ? (rootDir + '/' + relativePath) : relativePath;
+                e.dataTransfer.setData('text/plain', absolutePath);
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+
             itemRow.addEventListener('click', (e) => {
                 e.stopPropagation();
                 openFileTab(item);
@@ -1291,7 +1456,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateEditorVisibility();
             markdownContent.innerHTML = `
                 <div class="welcome-screen">
-                    <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/favicon.png" alt="" width="28" height="28" style="border-radius: 5px;"> Sublime Markdown</h1>
+                    <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/favicon.png" alt="" width="28" height="28" style="border-radius: 5px;"> CompassAI</h1>
                     <p>Selecciona un archivo <code>.md</code> del panel izquierdo para comenzar.</p>
                 </div>
             `;
@@ -2365,13 +2530,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openFileFromSearch(result) {
-        // Necesitamos construir el objeto 'item' que espera openFile()
+        // Necesitamos construir el objeto 'item' que espera openFileTab()
         const fakeItem = {
             path: result.path,
             name: result.name,
             type: 'file'
         };
-        openFile(fakeItem);
+        openFileTab(fakeItem);
     }
 
     // Expose app controller to other scripts (like chat.js)

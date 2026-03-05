@@ -1,5 +1,5 @@
 {
-  "name": "markdown-viewer",
+  "name": "compassai",
   "version": "1.0.0",
   "description": "",
   "main": "main.js",
@@ -7,16 +7,34 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "start:app": "env ELECTRON_RUN_AS_NODE= electron .",
-    "build:mac": "electron-builder -m"
+    "build:mac": "electron-builder -m",
+    "build:win": "electron-builder --win",
+    "build:test": "electron-builder -m --config electron-builder.test.config.js && xattr -cr dist/mac-arm64/CompassAI.app && codesign --sign - --force --deep --no-strict dist/mac-arm64/CompassAI.app && rm -f dist/CompassAI-test.dmg && hdiutil create -volname CompassAI -srcfolder dist/mac-arm64/CompassAI.app -ov -format UDZO dist/CompassAI-test.dmg"
   },
   "build": {
-    "appId": "com.ramonandrio.sublime-os",
-    "productName": "SublimeOS",
+    "appId": "com.ramonandrio.compassai",
+    "productName": "CompassAI",
     "mac": {
       "category": "public.app-category.productivity",
-      "identity": null,
-      "icon": "build/icon.icns"
-    }
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "icon": "build/icon.icns",
+      "additionalArguments": ["--no-strict"],
+      "strictVerify": false,
+      "notarize": false
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "afterExtract": "./scripts/afterExtract.js",
+    "afterPack": "./scripts/clear-xattr.js",
+    "afterSign": "./scripts/notarize.js"
   },
   "keywords": [],
   "author": "",
@@ -32,10 +50,13 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@electron/rebuild": "^4.0.3",
     "concurrently": "^9.2.1",
+    "dotenv": "^17.3.1",
     "electron": "^40.6.1",
     "electron-builder": "^26.8.1",
+    "electron-osx-sign": "^0.6.0",
     "wait-on": "^9.0.4"
   }
 }

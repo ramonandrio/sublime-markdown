@@ -35,6 +35,9 @@ class TerminalController {
         this.closePanelBtn = document.getElementById('closeTerminalPanelBtn');
         this.toolbarClaudeBtn = document.getElementById('toolbarClaudeBtn');
         this.toolbarSkillsBtn = document.getElementById('toolbarSkillsBtn');
+        this.toolbarSetupBtn = document.getElementById('toolbarSetupBtn');
+        this.toolbarPrdBtn = document.getElementById('toolbarPrdBtn');
+        this.toolbarAttachBtn = document.getElementById('toolbarAttachBtn');
         this.splitViewContainer = document.querySelector('.split-view-container');
 
         this.isResizing = false;
@@ -60,7 +63,7 @@ class TerminalController {
                         });
                         inst.isClaudeActive = true;
                     } else {
-                        // If claude is running, send the /exit command but wait for user to hit enter
+                        // Si Claude está corriendo, enviar /exit
                         this.ipcRenderer.send('terminal-input', {
                             id: this.activeInstanceId,
                             input: '/exit'
@@ -76,7 +79,7 @@ class TerminalController {
                 }
             });
         }
-        
+
         if (this.toolbarSkillsBtn) {
             this.toolbarSkillsBtn.addEventListener('click', () => {
                 if (this.activeInstanceId && this.ipcRenderer) {
@@ -87,9 +90,59 @@ class TerminalController {
                         id: this.activeInstanceId,
                         input: '/skills'
                     });
-                    
+
                     if (inst.term) {
                         inst.term.focus();
+                    }
+                }
+            });
+        }
+
+        if (this.toolbarSetupBtn) {
+            this.toolbarSetupBtn.addEventListener('click', () => {
+                if (this.activeInstanceId && this.ipcRenderer) {
+                    const inst = this.instances.get(this.activeInstanceId);
+                    if (!inst || !inst.isClaudeActive) return;
+
+                    this.ipcRenderer.send('terminal-input', {
+                        id: this.activeInstanceId,
+                        input: '/setup'
+                    });
+
+                    if (inst.term) {
+                        inst.term.focus();
+                    }
+                }
+            });
+        }
+
+        if (this.toolbarPrdBtn) {
+            this.toolbarPrdBtn.addEventListener('click', () => {
+                if (this.activeInstanceId && this.ipcRenderer) {
+                    const inst = this.instances.get(this.activeInstanceId);
+                    if (!inst || !inst.isClaudeActive) return;
+
+                    this.ipcRenderer.send('terminal-input', {
+                        id: this.activeInstanceId,
+                        input: '/prd-draft'
+                    });
+
+                    if (inst.term) {
+                        inst.term.focus();
+                    }
+                }
+            });
+        }
+
+        if (this.toolbarAttachBtn) {
+            this.toolbarAttachBtn.addEventListener('click', async () => {
+                if (this.activeInstanceId && this.ipcRenderer) {
+                    const inst = this.instances.get(this.activeInstanceId);
+                    if (!inst || !inst.isClaudeActive) return;
+
+                    const filePaths = await this.ipcRenderer.invoke('select-file');
+                    if (filePaths && filePaths.length > 0) {
+                        this.insertFilePaths(filePaths);
                     }
                 }
             });
@@ -158,13 +211,50 @@ class TerminalController {
 
         this.ipcRenderer.on('terminal-output', (event, { id, data, type }) => {
             if (this.instances.has(id)) {
-                this.instances.get(id).term.write(data);
+                const inst = this.instances.get(id);
+
+                // Always write data to the terminal so nothing is swallowed
+                inst.term.write(data);
+
+                if (type === 'auth_error' && inst.isClaudeActive && !inst._authAlertShown) {
+                    // Only show the alert when Claude was running (not during login flow)
+                    inst._authAlertShown = true;
+                    inst.isClaudeActive = false;
+                    this.updateClaudeBtnUI();
+
+                    setTimeout(() => {
+                        window.alert('Tu sesión de Claude CLI ha expirado.\nDebes escribir /login en la terminal y pulsar Enter para volver a identificarte con tu cuenta Pro/Team.');
+                        inst._authAlertShown = false;
+                    }, 500);
+                } else if (inst.isClaudeActive && typeof data === 'string') {
+                    // Detect when Claude exits back to the shell prompt
+                    const claudeExitPatterns = [
+                        'Bye!',               // Claude CLI farewell message
+                        '> Human:',           // some versions echo this on exit
+                        '\x1b[?25h\r\n$',     // bash prompt reappearing
+                    ];
+                    const exited = claudeExitPatterns.some(p => data.includes(p));
+                    if (exited) {
+                        inst.isClaudeActive = false;
+                        this.updateClaudeBtnUI();
+                    }
+                }
             }
         });
 
         this.ipcRenderer.on('terminal-exit', (event, { id, code }) => {
             if (this.instances.has(id)) {
-                this.instances.get(id).term.writeln(`\r\n[Proceso terminado con código ${code}]`);
+                const inst = this.instances.get(id);
+                inst.term.writeln(`\r\n[Proceso terminado con código ${code}]`);
+
+                // When the shell (bash) dies, Claude is also gone by definition.
+                // Reset the flag so the toolbar shows "Arrancar Claude" again.
+                if (inst.isClaudeActive) {
+                    inst.isClaudeActive = false;
+                    if (this.activeInstanceId === id) {
+                        this.updateClaudeBtnUI();
+                    }
+                }
             }
         });
     }
@@ -199,7 +289,7 @@ class TerminalController {
 
     async createNewInstance() {
         if (!this.ipcRenderer || !Terminal) {
-            alert('Las terminales reales solo están disponibles en modo nativo (SublimeOS).');
+            alert('Las terminales reales solo están disponibles en modo nativo (CompassAI).');
             return;
         }
 
@@ -210,8 +300,8 @@ class TerminalController {
             : null;
 
         const res = await this.ipcRenderer.invoke('terminal-start', {
-            cwd: currentDir,
-            command: 'bash'
+            cwd: currentDir
+            // omitted command so it defaults to process.env.SHELL on the backend
         });
 
         if (res.success) {
@@ -324,6 +414,113 @@ class TerminalController {
         resizeObserver.observe(domBody);
 
         this.instances.set(id, { id, tabBtn, domBody, term, fitAddon, resizeObserver, isClaudeActive: false });
+
+        // --- Drag & Drop support for file attachment ---
+        // Prevent Electron from navigating to dropped files (global, idempotent)
+        if (!TerminalController._dragPreventionInstalled) {
+            document.addEventListener('dragover', (e) => e.preventDefault(), true);
+            document.addEventListener('drop', (e) => e.preventDefault(), true);
+            TerminalController._dragPreventionInstalled = true;
+        }
+
+        const dropOverlay = document.createElement('div');
+        dropOverlay.className = 'terminal-drop-overlay';
+        dropOverlay.innerHTML = '<div class="terminal-drop-label">📎 Suelta archivos aquí para adjuntar</div>';
+        dropOverlay.style.cssText = 'display:none; position:absolute; inset:0; background:rgba(59,130,246,0.15); border:2px dashed rgba(59,130,246,0.6); border-radius:8px; z-index:100; align-items:center; justify-content:center;';
+        dropOverlay.querySelector('.terminal-drop-label').style.cssText = 'background:rgba(59,130,246,0.9); color:white; padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; pointer-events:none;';
+        domBody.style.position = 'relative';
+        domBody.appendChild(dropOverlay);
+
+        let dragCounter = 0;
+
+        // Use the entire panel for dragenter so we catch events even over the xterm canvas
+        const panelEl = this.panel;
+
+        panelEl.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            const inst = this.instances.get(id);
+            if (inst && inst.isClaudeActive && this.activeInstanceId === id) {
+                dropOverlay.style.display = 'flex';
+            }
+        });
+
+        panelEl.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                dropOverlay.style.display = 'none';
+            }
+        });
+
+        panelEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'copy';
+        });
+
+        // The overlay itself accepts the drop (it covers the xterm canvas)
+        dropOverlay.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter = 0;
+            dropOverlay.style.display = 'none';
+
+            const inst = this.instances.get(id);
+            if (!inst || !inst.isClaudeActive) return;
+
+            // Check for internal file tree drag (text/plain with relative path)
+            const internalPath = e.dataTransfer.getData('text/plain');
+            if (internalPath && !e.dataTransfer.files.length) {
+                this.insertFilePaths([internalPath]);
+                return;
+            }
+
+            // External file drag from Finder
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                const paths = [];
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].path) {
+                        paths.push(files[i].path);
+                    }
+                }
+                if (paths.length > 0) {
+                    this.insertFilePaths(paths);
+                }
+            }
+        });
+
+        // Also handle drop on the domBody itself as a fallback
+        domBody.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter = 0;
+            dropOverlay.style.display = 'none';
+
+            const inst = this.instances.get(id);
+            if (!inst || !inst.isClaudeActive) return;
+
+            const internalPath = e.dataTransfer.getData('text/plain');
+            if (internalPath && !e.dataTransfer.files.length) {
+                this.insertFilePaths([internalPath]);
+                return;
+            }
+
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                const paths = [];
+                for (let i = 0; i < files.length; i++) {
+                    if (files[i].path) {
+                        paths.push(files[i].path);
+                    }
+                }
+                if (paths.length > 0) {
+                    this.insertFilePaths(paths);
+                }
+            }
+        });
     }
 
     setActiveInstance(id) {
@@ -362,9 +559,21 @@ class TerminalController {
                     Terminar Claude
                 `;
                 this.toolbarClaudeBtn.style.color = 'var(--text-color)';
-                
+
                 if (this.toolbarSkillsBtn) {
                     this.toolbarSkillsBtn.style.display = 'flex';
+                }
+                if (this.toolbarSetupBtn) {
+                    this.toolbarSetupBtn.style.display = 'flex';
+                }
+                if (this.toolbarSkillsBtn) {
+                    this.toolbarSkillsBtn.style.display = 'flex';
+                }
+                if (this.toolbarPrdBtn) {
+                    this.toolbarPrdBtn.style.display = 'flex';
+                }
+                if (this.toolbarAttachBtn) {
+                    this.toolbarAttachBtn.style.display = 'flex';
                 }
             } else {
                 this.toolbarClaudeBtn.innerHTML = `
@@ -372,9 +581,18 @@ class TerminalController {
                     Arrancar Claude
                 `;
                 this.toolbarClaudeBtn.style.color = 'var(--text-color)';
-                
+
+                if (this.toolbarSetupBtn) {
+                    this.toolbarSetupBtn.style.display = 'none';
+                }
                 if (this.toolbarSkillsBtn) {
                     this.toolbarSkillsBtn.style.display = 'none';
+                }
+                if (this.toolbarPrdBtn) {
+                    this.toolbarPrdBtn.style.display = 'none';
+                }
+                if (this.toolbarAttachBtn) {
+                    this.toolbarAttachBtn.style.display = 'none';
                 }
             }
         }
@@ -402,6 +620,22 @@ class TerminalController {
                 this.activeInstanceId = null;
                 this.togglePanel(false);
             }
+        }
+    }
+
+    insertFilePaths(paths) {
+        if (!this.activeInstanceId || !this.ipcRenderer) return;
+        const inst = this.instances.get(this.activeInstanceId);
+        if (!inst || !inst.isClaudeActive) return;
+
+        const text = paths.join(' ');
+        this.ipcRenderer.send('terminal-input', {
+            id: this.activeInstanceId,
+            input: text
+        });
+
+        if (inst.term) {
+            inst.term.focus();
         }
     }
 }

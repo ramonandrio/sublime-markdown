@@ -14,7 +14,7 @@ async function createWindow(initialDir) {
     const mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
-        title: "SublimeOS (Sublime Markdown)",
+        title: "CompassAI",
         titleBarStyle: 'hiddenInset',
         webPreferences: {
             nodeIntegration: true,
@@ -23,15 +23,17 @@ async function createWindow(initialDir) {
     });
 
     // Register this instance
-    windowData.set(mainWindow.webContents.id, {
+    const webContentsId = mainWindow.webContents.id;
+    windowData.set(webContentsId, {
         window: mainWindow,
         server: serverInstance
     });
 
     mainWindow.on('closed', () => {
         // Cleanup when this specific window is closed
+        // Note: webContents is already destroyed at this point, use the saved id
         serverInstance.close();
-        windowData.delete(mainWindow.webContents.id);
+        windowData.delete(webContentsId);
     });
 
     mainWindow.loadURL(`http://localhost:${port}`);
@@ -41,7 +43,11 @@ async function createWindow(initialDir) {
 // Function to get the server tied to the IPC request sender
 function getServerFromSender(webContentsId) {
     const data = windowData.get(webContentsId);
-    return data ? data.server : null;
+    if (!data) {
+        console.warn(`[main] getServerFromSender: no window registered for webContents id=${webContentsId}`);
+        return null;
+    }
+    return data.server;
 }
 
 // Function to setup application menu (to allow Cmd+N for new windows)
@@ -142,8 +148,8 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
         const terminalManager = require('./terminal-manager');
         const senderId = event.sender.id;
         const server = getServerFromSender(senderId);
-        
-        const activeCwd = cwd || (server && server.getRootDir ? server.getRootDir() : process.env.PMOS_ROOT_DIR) || process.env.HOME;
+
+        const activeCwd = cwd || (server && typeof server.getRootDir === 'function' ? server.getRootDir() : null) || process.env.PMOS_ROOT_DIR || process.env.HOME;
 
         const id = terminalManager.startTerminal(
             activeCwd,
@@ -191,8 +197,8 @@ ipcMain.handle('select-folder', async (event) => {
 
     const result = await dialog.showOpenDialog(targetWindow, {
         properties: ['openDirectory', 'createDirectory'],
-        title: 'Selecciona tu base documental (Carpeta SublimeOS)',
-        buttonLabel: 'Abrir en SublimeOS'
+        title: 'Selecciona tu base documental (Carpeta CompassAI)',
+        buttonLabel: 'Abrir en CompassAI'
     });
     if (!result || result.canceled || result.filePaths.length === 0) {
         return null;
@@ -200,11 +206,78 @@ ipcMain.handle('select-folder', async (event) => {
     return result.filePaths[0];
 });
 
+ipcMain.handle('select-file', async (event) => {
+    const senderId = event.sender.id;
+    const targetWindow = windowData.get(senderId)?.window;
+
+    const result = await dialog.showOpenDialog(targetWindow, {
+        properties: ['openFile', 'multiSelections'],
+        title: 'Adjuntar archivos al terminal',
+        buttonLabel: 'Adjuntar'
+    });
+    if (!result || result.canceled || result.filePaths.length === 0) {
+        return null;
+    }
+    return result.filePaths;
+});
+
+ipcMain.handle('create-compassai-workspace', async (event, workspaceName) => {
+    const senderId = event.sender.id;
+    const targetWindow = windowData.get(senderId)?.window;
+
+    const result = await dialog.showOpenDialog(targetWindow, {
+        properties: ['openDirectory', 'createDirectory'],
+        title: 'Selecciona dónde crear tu workspace CompassAI',
+        buttonLabel: 'Crear aquí'
+    });
+
+    if (!result || result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: 'Cancelado por el usuario' };
+    }
+
+    const parentDir = result.filePaths[0];
+    const targetDir = path.join(parentDir, workspaceName);
+    const templateDir = path.join(__dirname, 'templates', 'compassai');
+
+    const fs = require('fs');
+
+    // Helper function to recursively copy from asar to normal filesystem
+    function copyDirFromAsar(src, dest) {
+        if (!fs.existsSync(dest)) {
+            fs.mkdirSync(dest, { recursive: true });
+        }
+
+        const entries = fs.readdirSync(src, { withFileTypes: true });
+        for (const entry of entries) {
+            const srcPath = path.join(src, entry.name);
+            const destPath = path.join(dest, entry.name);
+
+            if (entry.isDirectory()) {
+                copyDirFromAsar(srcPath, destPath);
+            } else {
+                fs.copyFileSync(srcPath, destPath);
+            }
+        }
+    }
+
+    try {
+        if (fs.existsSync(targetDir)) {
+            return { success: false, error: 'La carpeta ya existe' };
+        }
+
+        copyDirFromAsar(templateDir, targetDir);
+
+        return { success: true, path: targetDir };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
 app.whenReady().then(async () => {
     setupMenu();
     // Start with a generic directory. The frontend will override this via API per window.
     process.env.PMOS_ROOT_DIR = path.resolve(__dirname, '..');
-    
+
     // Create initial window
     await createWindow();
 
@@ -230,7 +303,7 @@ app.on('will-quit', () => {
     // Close all dangling servers
     windowData.forEach(data => {
         if (data.server) {
-            try { data.server.close(); } catch(e) {}
+            try { data.server.close(); } catch (e) { }
         }
     });
     windowData.clear();

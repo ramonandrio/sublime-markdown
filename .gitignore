@@ -3,3 +3,5 @@ node_modules/
 *.log
 dist/
 build/
+.env
+electron-builder.test.config.js
