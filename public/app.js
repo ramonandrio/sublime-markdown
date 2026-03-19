@@ -18,6 +18,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const tocPanel = document.getElementById('tocPanel');
     const tocList = document.getElementById('tocList');
     const previewPanel = document.getElementById('previewPanel');
+    const lineNumbers  = document.getElementById('lineNumbers');
+
+    // --- LINE NUMBERS ---
+    function updateLineNumbers() {
+        if (!lineNumbers) return;
+        const lines = markdownEditor.value.split('\n');
+        lineNumbers.innerHTML = lines.map((_, i) => `<span>${i + 1}</span>`).join('');
+        // Sync scroll position
+        lineNumbers.scrollTop = markdownEditor.scrollTop;
+    }
+
+    markdownEditor.addEventListener('input',  updateLineNumbers);
+    markdownEditor.addEventListener('scroll', () => {
+        if (lineNumbers) lineNumbers.scrollTop = markdownEditor.scrollTop;
+    });
 
     // Welcome screen
     const welcomeLocalBtn = document.getElementById('welcomeLocalBtn');
@@ -108,19 +123,34 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateSourceIndicator() {
         if (!sourceIndicator) return;
 
+        let projectName = 'CompassAI';
+
         if (currentLocalFolderHandle) {
+            projectName = currentLocalFolderHandle.name;
             sourceIndicator.innerHTML = `
                 <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                 <span>Local: ${currentLocalFolderHandle.name}</span>
             `;
             sourceIndicator.title = `Carpeta Local: ${currentLocalFolderHandle.name}`;
         } else if (currentNodeServer) {
+            let folderName = 'Servidor Local';
+            if (typeof window.require !== 'undefined') {
+                const lastFolder = localStorage.getItem('pmos_last_folder');
+                if (lastFolder) {
+                    const parts = lastFolder.split(/[/\\]/).filter(Boolean);
+                    if (parts.length > 0) {
+                        folderName = parts[parts.length - 1];
+                    }
+                }
+            }
+            projectName = folderName;
             sourceIndicator.innerHTML = `
                 <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
-                <span>Servidor Local</span>
+                <span>${folderName}</span>
             `;
-            sourceIndicator.title = `Servidor Node Local`;
+            sourceIndicator.title = `Servidor Node Local: ${folderName}`;
         } else if (currentGitHubRepo) {
+            projectName = currentGitHubRepo.repo;
             sourceIndicator.innerHTML = `
                 <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.379.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z"></path></svg>
                 <span>GH: ${currentGitHubRepo.repo}</span>
@@ -129,6 +159,29 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             sourceIndicator.innerHTML = '';
             sourceIndicator.title = '';
+        }
+
+        let formattedTitle = projectName;
+        if (projectName === 'Servidor Local') {
+            formattedTitle = 'CompassAI';
+        }
+
+        document.title = formattedTitle;
+
+        if (typeof window.require !== 'undefined') {
+            try {
+                const { ipcRenderer } = window.require('electron');
+                let representedPath = null;
+                if (currentNodeServer) {
+                    representedPath = localStorage.getItem('pmos_last_folder');
+                }
+                ipcRenderer.send('set-window-title', { 
+                    title: formattedTitle, 
+                    path: representedPath 
+                });
+            } catch (err) {
+                console.error('Error setting native window title via IPC', err);
+            }
         }
     }
 
@@ -164,10 +217,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const DB_NAME = 'MarkdownViewerDB';
         const STORE_NAME = 'workspace';
         const NOTES_STORE = 'notes';
+        const SETTINGS_STORE = 'settings';
 
         function getDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, 2);
+                const request = indexedDB.open(DB_NAME, 3);
                 request.onerror = () => reject(request.error);
                 request.onsuccess = () => resolve(request.result);
                 request.onupgradeneeded = (e) => {
@@ -177,6 +231,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (!db.objectStoreNames.contains(NOTES_STORE)) {
                         db.createObjectStore(NOTES_STORE);
+                    }
+                    if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+                        db.createObjectStore(SETTINGS_STORE, { keyPath: 'key' });
                     }
                 };
             });
@@ -250,6 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentNodeServer,
             activeTabId,
             expandedFolders: [...expandedFolders],
+            codaPages: window._getCodaPages ? window._getCodaPages() : [],
             openTabs: openTabs.map(t => ({
                 id: t.id,
                 name: t.name,
@@ -259,10 +317,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 isNode: t.isNode,
                 isGitHub: t.isGitHub,
                 isHtml: t.isHtml,
+                isCoda: t.isCoda,
+                codaId: t.codaId,
+                codaEmbedUrl: t.codaEmbedUrl,
                 githubMeta: t.githubMeta,
-                content: t.content,
-                rawContent: t.rawContent,
-                savedContent: t.savedContent,
+                content: t.isCoda ? '' : t.content,
+                rawContent: t.isCoda ? '' : t.rawContent,
+                savedContent: t.isCoda ? '' : t.savedContent,
                 dirty: t.dirty
             }))
         };
@@ -290,6 +351,11 @@ document.addEventListener('DOMContentLoaded', () => {
             openTabs = state.openTabs || [];
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
+
+            // Restore Coda pages (will render the sidebar list)
+            if (state.codaPages && window._setCodaPages) {
+                window._setCodaPages(state.codaPages);
+            }
 
             // En CompassAI nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
@@ -834,12 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Toggle Sidebar
-    const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
     const sidebar = document.getElementById('sidebar');
-    toggleSidebarBtn.addEventListener('click', () => {
-        sidebar.classList.toggle('collapsed');
-        toggleSidebarBtn.classList.toggle('collapsed');
-    });
 
     // Mobile sidebar drawer
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
@@ -1083,6 +1144,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applySnapshot(snapshot) {
         markdownEditor.value = snapshot.text;
+        updateLineNumbers();
         markdownEditor.setSelectionRange(snapshot.cursor, snapshot.cursor);
 
         const activeTab = openTabs.find(t => t.id === activeTabId);
@@ -1339,17 +1401,24 @@ document.addEventListener('DOMContentLoaded', () => {
         setActiveTab(fileId);
     }
 
+    let draggedTabId = null;
+
     function renderTabs() {
         tabsContainer.innerHTML = '';
-        openTabs.forEach(tabData => {
+        openTabs.forEach((tabData, index) => {
             const tabEl = document.createElement('div');
             tabEl.className = `tab ${tabData.id === activeTabId ? 'active' : ''}`;
             tabEl.style.display = 'flex';
+            tabEl.draggable = true;
+            tabEl.dataset.tabIndex = index;
 
-            const dirtyDot = tabData.dirty ? '<span class="dirty-dot">●</span>' : '';
-            const iconClass = tabData.isHtml ? 'icon-html' : 'icon-md';
+            const dirtyDot = (!tabData.isCoda && tabData.dirty) ? '<span class="dirty-dot">●</span>' : '';
+            const iconClass = tabData.isCoda ? '' : (tabData.isHtml ? 'icon-html' : 'icon-md');
+            const iconHtml = tabData.isCoda
+                ? `<svg class="coda-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>`
+                : `<span class="file-icon ${iconClass}"></span>`;
             tabEl.innerHTML = `
-                <span class="file-icon ${iconClass}"></span>
+                ${iconHtml}
                 <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}</span>${dirtyDot}
                 <button class="close-tab">×</button>
             `;
@@ -1361,6 +1430,46 @@ document.addEventListener('DOMContentLoaded', () => {
             tabEl.querySelector('.close-tab').addEventListener('click', (e) => {
                 e.stopPropagation();
                 closeTab(tabData.id);
+            });
+
+            // Drag reorder
+            tabEl.addEventListener('dragstart', (e) => {
+                draggedTabId = tabData.id;
+                tabEl.classList.add('tab-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/x-tab-reorder', tabData.id);
+            });
+
+            tabEl.addEventListener('dragend', () => {
+                draggedTabId = null;
+                tabEl.classList.remove('tab-dragging');
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('tab-drag-over'));
+            });
+
+            tabEl.addEventListener('dragover', (e) => {
+                if (!draggedTabId) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                tabEl.classList.add('tab-drag-over');
+            });
+
+            tabEl.addEventListener('dragleave', () => {
+                tabEl.classList.remove('tab-drag-over');
+            });
+
+            tabEl.addEventListener('drop', (e) => {
+                e.preventDefault();
+                tabEl.classList.remove('tab-drag-over');
+                if (!draggedTabId || draggedTabId === tabData.id) return;
+
+                const fromIndex = openTabs.findIndex(t => t.id === draggedTabId);
+                const toIndex = openTabs.findIndex(t => t.id === tabData.id);
+                if (fromIndex === -1 || toIndex === -1) return;
+
+                const [moved] = openTabs.splice(fromIndex, 1);
+                openTabs.splice(toIndex, 0, moved);
+                renderTabs();
+                saveWorkspaceState();
             });
 
             tabsContainer.appendChild(tabEl);
@@ -1397,7 +1506,36 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeTreeItem) activeTreeItem.classList.add('active');
         }
 
+        // Bidirectional tab link: if a terminal is linked to this document, switch to it too
+        if (fileId && window.terminalCtrl && typeof window.terminalCtrl.activateTerminalForFile === 'function') {
+            window.terminalCtrl.activateTerminalForFile(fileId);
+        }
+
         const activeTab = openTabs.find(t => t.id === fileId);
+
+        const previewPanel = document.getElementById('previewPanel');
+        const editorPanel  = document.getElementById('editorPanel');
+        const codaPanel    = document.getElementById('codaPanel');
+
+        // Handle Coda tabs: show webview panel full-screen, hide everything else
+        if (activeTab && activeTab.isCoda) {
+            editorToolbar.style.display = 'none';
+            if (previewPanel) previewPanel.style.display = 'none';
+            if (editorPanel)  editorPanel.style.display  = 'none';
+            if (codaPanel) {
+                codaPanel.style.display = 'flex';
+                codaPanel.style.flex = '1';
+                codaPanel.style.width = '100%';
+                codaPanel.style.height = '100%';
+            }
+            if (window._showCodaPanel) window._showCodaPanel(activeTab.codaEmbedUrl);
+            return;
+        } else {
+            // Hide Coda panel and restore normal panels
+            if (codaPanel) codaPanel.style.display = 'none';
+            // Restore previewPanel (may have been hidden for Coda)
+            if (previewPanel) previewPanel.style.display = 'flex';
+        }
 
         if (activeTab) {
             editorToolbar.style.display = 'flex';
@@ -1445,6 +1583,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 markdownContent.innerHTML = '<div class="loading-state">Cargando...</div>';
             }
             markdownEditor.value = activeTab.rawContent !== null ? activeTab.rawContent : '';
+            updateLineNumbers();
             // Ensure undo history is initialized for this tab
             const h = tabHistory[fileId];
             if (!h || h.undoStack.length === 0) {
@@ -1454,6 +1593,8 @@ document.addEventListener('DOMContentLoaded', () => {
             editorToolbar.style.display = 'none';
             isEditorOpen = false;
             updateEditorVisibility();
+            if (codaPanel) codaPanel.style.display = 'none';
+            if (previewPanel) previewPanel.style.display = 'flex';
             markdownContent.innerHTML = `
                 <div class="welcome-screen">
                     <h1 style="display: flex; align-items: center; gap: 10px;"><img src="/favicon.png" alt="" width="28" height="28" style="border-radius: 5px;"> CompassAI</h1>
@@ -1553,6 +1694,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
                 markdownEditor.value = tabData.rawContent;
+                updateLineNumbers();
                 initHistory(tabData.id, tabData.rawContent);
                 if (isTocOpen) generateTOC();
             }
@@ -1702,6 +1844,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (tab.id === activeTabId) {
                     markdownContent.innerHTML = tab.content;
                     markdownEditor.value = tab.rawContent;
+                    updateLineNumbers();
                     initHistory(tab.id, tab.rawContent);
                     if (isTocOpen) generateTOC();
                 }
@@ -1905,6 +2048,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================
 
     function updateEditorVisibility() {
+        // If a Coda tab is active, the editor must stay hidden regardless of the toggle
+        const activeTabId = document.querySelector('.tab.active')?.dataset.id;
+        const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
+        if (activeTab && activeTab.isCoda) {
+            editorPanel.style.display = 'none';
+            return;
+        }
+
         if (isEditorOpen) {
             editorPanel.style.display = 'flex';
             toggleSplitBtn.innerHTML = `
@@ -1925,6 +2076,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================
 
     function updateTocVisibility() {
+        // Hide TOC for Coda tabs
+        const activeTabId = document.querySelector('.tab.active')?.dataset.id;
+        const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
+        if (activeTab && activeTab.isCoda) {
+            tocPanel.style.display = 'none';
+            return;
+        }
+
         if (isTocOpen) {
             tocPanel.style.display = 'flex';
             toggleTocBtn.classList.add('active');
@@ -2545,7 +2704,861 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!activeTabId) return null;
             const tab = openTabs.find(t => t.id === activeTabId);
             return tab ? tab.name : null;
-        }
+        },
+        get activeTabId() { return activeTabId; },
+        get openTabs() { return openTabs; },
+        setActiveTab: setActiveTab
     };
+
+    // === SIDEBAR RESIZER ===
+    const sidebarEl = document.getElementById('sidebar');
+    const sidebarResizer = document.getElementById('sidebarResizer');
+
+    if (sidebarEl && sidebarResizer) {
+        let isResizingSidebar = false;
+
+        sidebarResizer.addEventListener('mousedown', (e) => {
+            isResizingSidebar = true;
+            sidebarResizer.classList.add('is-resizing');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizingSidebar) return;
+            const newWidth = e.clientX;
+            if (newWidth >= 150 && newWidth <= 800) {
+                sidebarEl.style.width = newWidth + 'px';
+                sidebarEl.style.transition = 'none';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizingSidebar) {
+                isResizingSidebar = false;
+                sidebarResizer.classList.remove('is-resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                sidebarEl.style.transition = '';
+            }
+        });
+    }
+
+    // === HORIZONTAL RESIZER (FILE TREE / CODA) ===
+    const fileTreeEl = document.getElementById('fileTreeContainer');
+    const codaResizer = document.getElementById('codaResizer');
+
+    if (sidebarEl && fileTreeEl && codaResizer) {
+        let isResizingCoda = false;
+        let startY, startHeight;
+
+        codaResizer.addEventListener('mousedown', (e) => {
+            isResizingCoda = true;
+            codaResizer.classList.add('is-resizing');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            
+            startY = e.clientY;
+            startHeight = fileTreeEl.getBoundingClientRect().height;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizingCoda) return;
+            const deltaY = e.clientY - startY;
+            const newHeight = startHeight + deltaY;
+            
+            // Limit minimum heights for both sections
+            const minTreeHeight = 60;
+            const minCodaHeight = 60;
+            // Ensure there's space for header etc.
+            const maxTreeHeight = sidebarEl.getBoundingClientRect().height - minCodaHeight - 50; 
+            
+            if (newHeight >= minTreeHeight && newHeight <= maxTreeHeight) {
+                fileTreeEl.style.flex = 'none';
+                fileTreeEl.style.height = newHeight + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizingCoda) {
+                isResizingCoda = false;
+                codaResizer.classList.remove('is-resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+    }
+
+    // === HORIZONTAL RESIZER (CODA / NOTION) ===
+    const codaSectionEl = document.getElementById('codaSection');
+    const notionResizer = document.getElementById('notionResizer');
+
+    if (sidebarEl && codaSectionEl && notionResizer) {
+        let isResizingNotion = false;
+        let startYNotion, startHeightNotion;
+
+        notionResizer.addEventListener('mousedown', (e) => {
+            isResizingNotion = true;
+            notionResizer.classList.add('is-resizing');
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+            
+            startYNotion = e.clientY;
+            startHeightNotion = codaSectionEl.getBoundingClientRect().height;
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizingNotion) return;
+            const deltaY = e.clientY - startYNotion;
+            const newHeight = startHeightNotion + deltaY;
+            
+            const minCodaHeight = 60;
+            const minNotionHeight = 60;
+            const maxCodaHeight = sidebarEl.getBoundingClientRect().height - minNotionHeight - 100; // Account for tree and margins
+            
+            if (newHeight >= minCodaHeight && newHeight <= maxCodaHeight) {
+                codaSectionEl.style.flex = 'none';
+                codaSectionEl.style.height = newHeight + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizingNotion) {
+                isResizingNotion = false;
+                notionResizer.classList.remove('is-resizing');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+    }
+
+    // ============================================================
+    // SETTINGS MODAL + CODA/NOTION PHASE 2 (API Key)
+    // ============================================================
+    (function () {
+        const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+
+        const modal        = document.getElementById('settingsModal');
+        const settingsBtn  = document.getElementById('settingsBtn');
+        const closeBtn     = document.getElementById('settingsCloseBtn');
+        
+        // Coda Elements
+        const apiKeyInput  = document.getElementById('codaApiKeyInput');
+        const toggleBtn    = document.getElementById('codaApiKeyToggle');
+        const saveBtn      = document.getElementById('codaApiKeySave');
+        const removeBtn    = document.getElementById('codaApiKeyRemove');
+        const statusEl     = document.getElementById('codaApiKeyStatus');
+
+        // Notion Elements
+        const notionApiKeyInput  = document.getElementById('notionApiKeyInput');
+        const notionToggleBtn    = document.getElementById('notionApiKeyToggle');
+        const notionSaveBtn      = document.getElementById('notionApiKeySave');
+        const notionRemoveBtn    = document.getElementById('notionApiKeyRemove');
+        const notionStatusEl     = document.getElementById('notionApiKeyStatus');
+
+        if (!modal || !settingsBtn) return;
+
+        // ---- Persist API keys in IndexedDB via the existing WorkspaceDB ----
+        const CODA_KEY_STORE = 'coda_api_key';
+        const NOTION_KEY_STORE = 'notion_api_key';
+
+        async function loadApiKey(storeName) {
+            try {
+                const db = await WorkspaceDB.getDB();
+                return new Promise((res, rej) => {
+                    const tx = db.transaction('settings', 'readonly');
+                    const store = tx.objectStore('settings');
+                    const req = store.get(storeName);
+                    req.onsuccess = () => res(req.result?.value || null);
+                    req.onerror  = () => res(null);
+                });
+            } catch { return null; }
+        }
+
+        async function saveApiKey(storeName, key) {
+            try {
+                const db = await WorkspaceDB.getDB();
+                return new Promise((res, rej) => {
+                    const tx = db.transaction('settings', 'readwrite');
+                    const store = tx.objectStore('settings');
+                    const req = store.put({ key: storeName, value: key });
+                    req.onsuccess = () => res(true);
+                    req.onerror  = () => res(false);
+                });
+            } catch { return false; }
+        }
+
+        async function deleteApiKey(storeName) {
+            try {
+                const db = await WorkspaceDB.getDB();
+                return new Promise((res) => {
+                    const tx = db.transaction('settings', 'readwrite');
+                    const store = tx.objectStore('settings');
+                    store.delete(storeName);
+                    tx.oncomplete = () => res(true);
+                });
+            } catch { return false; }
+        }
+
+        // ---- Coda API helper ----
+        async function codaGet(apiPath, apiKey) {
+            if (!ipcRenderer) {
+                // Fallback for non-Electron (dev): direct fetch (may fail CORS)
+                const r = await fetch(`https://coda.io/apis/v1${apiPath}`, {
+                    headers: { 'Authorization': `Bearer ${apiKey}` }
+                });
+                return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
+            }
+            return ipcRenderer.invoke('coda-api-request', { path: apiPath, apiKey });
+        }
+
+        // ---- Notion API helper ----
+        async function notionReq(apiPath, method = 'GET', body = null, apiKey) {
+            if (!ipcRenderer) {
+                const r = await fetch(`https://api.notion.com/v1${apiPath}`, {
+                    method,
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Notion-Version': '2022-06-28',
+                        'Content-Type': 'application/json'
+                    },
+                    body: body ? JSON.stringify(body) : null
+                });
+                return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
+            }
+            return ipcRenderer.invoke('notion-api-request', { path: apiPath, method, body, apiKey });
+        }
+
+        // ---- Open / Close modal ----
+        function openModal() {
+            modal.style.display = 'flex';
+            
+            // Coda
+            loadApiKey(CODA_KEY_STORE).then(key => {
+                if (key) {
+                    apiKeyInput.value = key;
+                    removeBtn.style.display = 'inline-flex';
+                    setStatus(statusEl, '✓ Conectado', 'ok');
+                } else {
+                    apiKeyInput.value = '';
+                    removeBtn.style.display = 'none';
+                    setStatus(statusEl, '', '');
+                }
+            });
+
+            // Notion
+            loadApiKey(NOTION_KEY_STORE).then(key => {
+                if (key) {
+                    notionApiKeyInput.value = key;
+                    notionRemoveBtn.style.display = 'inline-flex';
+                    setStatus(notionStatusEl, '✓ Conectado', 'ok');
+                } else {
+                    notionApiKeyInput.value = '';
+                    notionRemoveBtn.style.display = 'none';
+                    setStatus(notionStatusEl, '', '');
+                }
+            });
+        }
+
+        function closeModal() { modal.style.display = 'none'; }
+
+        settingsBtn.addEventListener('click', openModal);
+        closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.style.display !== 'none') closeModal();
+        });
+
+        // Toggle password visibility
+        toggleBtn.addEventListener('click', () => {
+            apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
+        });
+        notionToggleBtn.addEventListener('click', () => {
+            notionApiKeyInput.type = notionApiKeyInput.type === 'password' ? 'text' : 'password';
+        });
+
+        function setStatus(el, msg, cls) {
+            el.textContent = msg;
+            el.className = 'settings-status' + (cls ? ` ${cls}` : '');
+        }
+
+        // ---- Save & connect Coda ----
+        saveBtn.addEventListener('click', async () => {
+            const key = apiKeyInput.value.trim();
+            if (!key) { setStatus(statusEl, 'Introduce tu API Key', 'err'); return; }
+
+            setStatus(statusEl, 'Conectando...', '');
+            saveBtn.disabled = true;
+
+            const result = await codaGet('/whoami', key);
+            saveBtn.disabled = false;
+
+            if (result.ok && result.data) {
+                await saveApiKey(CODA_KEY_STORE, key);
+                currentCodaApiKey = key;
+                removeBtn.style.display = 'inline-flex';
+                setStatus(statusEl, `✓ Conectado como ${result.data.name || result.data.loginId || 'usuario'}`, 'ok');
+                await loadCodaTree();
+            } else {
+                setStatus(statusEl, 'API Key inválida o sin conexión', 'err');
+            }
+        });
+
+        // ---- Save & connect Notion ----
+        notionSaveBtn.addEventListener('click', async () => {
+            const key = notionApiKeyInput.value.trim();
+            if (!key) { setStatus(notionStatusEl, 'Introduce tu API Key', 'err'); return; }
+
+            setStatus(notionStatusEl, 'Conectando...', '');
+            notionSaveBtn.disabled = true;
+
+            const result = await notionReq('/users/me', 'GET', null, key);
+            notionSaveBtn.disabled = false;
+
+            if (result.ok && result.data) {
+                await saveApiKey(NOTION_KEY_STORE, key);
+                currentNotionApiKey = key;
+                notionRemoveBtn.style.display = 'inline-flex';
+                setStatus(notionStatusEl, `✓ Conectado como ${result.data.name || 'bot'}`, 'ok');
+                await loadNotionTree();
+            } else {
+                setStatus(notionStatusEl, 'API Key inválida o sin conexión', 'err');
+            }
+        });
+
+        // ---- Remove Coda ----
+        removeBtn.addEventListener('click', async () => {
+            await deleteApiKey(CODA_KEY_STORE);
+            currentCodaApiKey = null;
+            apiKeyInput.value = '';
+            removeBtn.style.display = 'none';
+            setStatus(statusEl, 'Desconectado', '');
+            clearCodaApiTree();
+        });
+
+        // ---- Remove Notion ----
+        notionRemoveBtn.addEventListener('click', async () => {
+            await deleteApiKey(NOTION_KEY_STORE);
+            currentNotionApiKey = null;
+            notionApiKeyInput.value = '';
+            notionRemoveBtn.style.display = 'none';
+            setStatus(notionStatusEl, 'Desconectado', '');
+            clearNotionApiTree();
+        });
+
+        // ---- Bootstrap on load ----
+        let currentCodaApiKey = null;
+        let currentNotionApiKey = null;
+
+        loadApiKey(CODA_KEY_STORE).then(async key => {
+            if (key) {
+                currentCodaApiKey = key;
+                await loadCodaTree();
+            }
+        });
+
+        loadApiKey(NOTION_KEY_STORE).then(async key => {
+            if (key) {
+                currentNotionApiKey = key;
+                await loadNotionTree();
+            }
+        });
+
+        // ---- Load & render document tree ----
+        async function loadCodaTree() {
+            if (!currentCodaApiKey) return;
+            const codaSection = document.getElementById('codaSection');
+            const codaResizer = document.getElementById('codaResizer');
+            if (!codaSection) return;
+
+            codaSection.style.display = 'flex';
+            if (codaResizer) codaResizer.style.display = 'block';
+
+            // Show loading state
+            let treeEl = codaSection.querySelector('.coda-api-tree');
+            if (!treeEl) {
+                treeEl = document.createElement('ul');
+                treeEl.className = 'coda-api-tree';
+                codaSection.appendChild(treeEl);
+            }
+            treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Cargando documentos...</li>';
+
+            const result = await codaGet('/docs?limit=50', currentCodaApiKey);
+            if (!result.ok || !result.data) {
+                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:#e53e3e;">Error al cargar docs</li>';
+                return;
+            }
+
+            const docs = result.data.items || [];
+            treeEl.innerHTML = '';
+
+            if (docs.length === 0) {
+                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Sin documentos</li>';
+                return;
+            }
+
+            docs.forEach(doc => {
+                const li = document.createElement('li');
+                li.className = 'coda-api-doc';
+                li.innerHTML = `
+                    <div class="coda-api-doc-header">
+                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+                        <span>${doc.name}</span>
+                    </div>
+                    <ul class="coda-api-pages"></ul>
+                `;
+
+                const header = li.querySelector('.coda-api-doc-header');
+                const pagesUl = li.querySelector('.coda-api-pages');
+                let loaded = false;
+
+                header.addEventListener('click', async () => {
+                    li.classList.toggle('expanded');
+                    if (li.classList.contains('expanded') && !loaded) {
+                        loaded = true;
+                        pagesUl.innerHTML = '<li style="padding:4px 8px;font-size:0.78rem;color:var(--text-muted);">Cargando p\u00e1ginas...</li>';
+
+                         // ---- Fetch ALL pages (handle Coda pagination) ----
+                        let allPages = [];
+                        let nextPageToken = null;
+                        let hasError = false;
+                        let errorMsg = '';
+
+                        try {
+                            do {
+                                const url = nextPageToken
+                                    ? `/docs/${doc.id}/pages?pageToken=${encodeURIComponent(nextPageToken)}`
+                                    : `/docs/${doc.id}/pages`;
+                                const pr = await codaGet(url, currentCodaApiKey);
+                                if (pr.ok && pr.data && Array.isArray(pr.data.items)) {
+                                    allPages = allPages.concat(pr.data.items);
+                                    nextPageToken = pr.data.nextPageToken || null;
+                                } else {
+                                    errorMsg = `HTTP ${pr.status} — ${JSON.stringify(pr.data).slice(0,120)}`;
+                                    hasError = true;
+                                    break;
+                                }
+                            } while (nextPageToken);
+                        } catch (ex) {
+                            hasError = true;
+                            errorMsg = ex.message || String(ex);
+                        }
+
+                        console.log('[Coda] Loaded', allPages.length, 'pages, hasError:', hasError);
+                        pagesUl.innerHTML = '';
+
+                        if (hasError) {
+                            pagesUl.innerHTML = `<li style="padding:4px 8px;font-size:0.78rem;color:#e53e3e;word-wrap:break-word;">Error: ${errorMsg}</li>`;
+                        } else if (allPages.length > 0) {
+                            // ---- Build parent→children map ----
+                            const pageMap = {};
+                            allPages.forEach(p => { pageMap[p.id] = { ...p, children: [] }; });
+
+                            const rootPages = [];
+                            allPages.forEach(p => {
+                                const parentId = p.parent?.id;
+                                if (parentId && pageMap[parentId]) {
+                                    pageMap[parentId].children.push(pageMap[p.id]);
+                                } else {
+                                    rootPages.push(pageMap[p.id]);
+                                }
+                            });
+
+                            // ---- Recursive tree renderer ----
+                            function renderPageNode(pageNode, containerUl) {
+                                const wrap = document.createElement('li');
+                                wrap.className = 'coda-api-page-item-container';
+
+                                const row = document.createElement('div');
+                                row.className = 'coda-api-page-item';
+
+                                const hasKids = pageNode.children.length > 0;
+                                const arrowSvg = hasKids
+                                    ? '<svg class="coda-folder-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>'
+                                    : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+                                row.innerHTML = `${arrowSvg}<span>${pageNode.name}</span>`;
+                                wrap.appendChild(row);
+
+                                if (hasKids) {
+                                    const childUl = document.createElement('ul');
+                                    childUl.style.cssText = 'display:none;list-style:none;padding-left:14px;margin:0;';
+                                    wrap.appendChild(childUl);
+
+                                    pageNode.children.forEach(child => renderPageNode(child, childUl));
+
+                                    const arrow = row.querySelector('.coda-folder-icon');
+                                    if (arrow) {
+                                        arrow.style.cursor = 'pointer';
+                                        arrow.style.transition = 'transform 0.15s';
+                                        arrow.addEventListener('click', (e) => {
+                                            e.stopPropagation();
+                                            const open = childUl.style.display === 'block';
+                                            childUl.style.display = open ? 'none' : 'block';
+                                            arrow.style.transform = open ? '' : 'rotate(90deg)';
+                                        });
+                                    }
+                                }
+
+                                row.addEventListener('click', () => openCodaApiPage(doc, pageNode, row));
+                                containerUl.appendChild(wrap);
+                            }
+
+                            rootPages.forEach(p => renderPageNode(p, pagesUl));
+
+                        } else {
+                            pagesUl.innerHTML = '<li style="padding:4px 8px;font-size:0.78rem;color:var(--text-muted);">Sin p\u00e1ginas</li>';
+                        }
+                    }
+                });
+
+                treeEl.appendChild(li);
+            });
+        }
+
+        function clearCodaApiTree() {
+            const codaSection = document.getElementById('codaSection');
+            const codaResizer = document.getElementById('codaResizer');
+            if (codaSection) codaSection.style.display = 'none';
+            if (codaResizer) codaResizer.style.display = 'none';
+            
+            const treeEl = codaSection?.querySelector('.coda-api-tree');
+            if (treeEl) treeEl.remove();
+        }
+
+        // ---- Open a Coda page via API ----
+        async function openCodaApiPage(doc, page, clickedEl) {
+            // Mark active in tree
+            document.querySelectorAll('.coda-api-page-item').forEach(el => el.classList.remove('active'));
+            if (clickedEl) clickedEl.classList.add('active');
+
+            // Check if already open
+            const tabId = `coda-api:${doc.id}:${page.id}`;
+            const existing = openTabs.find(t => t.id === tabId);
+            if (existing) { setActiveTab(tabId); return; }
+
+            // Use browserLink from the API — the exact correct Coda page URL
+            const pageUrl = page.browserLink || `https://coda.io/d/${doc.id}/${page.id}`;
+
+            const tab = {
+                id: tabId,
+                name: page.name,
+                path: null,
+                handle: null,
+                isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+                isCoda: true,
+                codaId: tabId,
+                codaEmbedUrl: pageUrl,
+                content: '', rawContent: '', savedContent: '', dirty: false
+            };
+
+            openTabs.push(tab);
+            setActiveTab(tabId);
+            saveWorkspaceState();
+        }
+
+        // ---- Load & render Notion tree ----
+        async function loadNotionTree() {
+            if (!currentNotionApiKey) return;
+            const notionSection = document.getElementById('notionSection');
+            const notionResizer = document.getElementById('notionResizer');
+            if (!notionSection) return;
+
+            notionSection.style.display = 'flex';
+            if (notionResizer) notionResizer.style.display = 'block';
+
+            let treeEl = notionSection.querySelector('.coda-api-tree'); // Reuse Coda classes for styling
+            if (!treeEl) {
+                treeEl = document.createElement('ul');
+                treeEl.className = 'coda-api-tree notion-api-tree';
+                notionSection.appendChild(treeEl);
+            }
+            treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Cargando docs...</li>';
+
+            // Notion search endpoint retrieves pages/databases shared with integration
+            const result = await notionReq('/search', 'POST', {
+                "filter": { "value": "page", "property": "object" },
+                "sort": { "direction": "descending", "timestamp": "last_edited_time" }
+            }, currentNotionApiKey);
+
+            if (!result.ok || !result.data) {
+                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:#e53e3e;">Error al cargar Notion</li>';
+                return;
+            }
+
+            const pages = result.data.results || [];
+            treeEl.innerHTML = '';
+
+            if (pages.length === 0) {
+                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Sin páginas (recuerda compartir tus páginas en Notion)</li>';
+                return;
+            }
+
+            pages.forEach(page => {
+                const li = document.createElement('li');
+                li.className = 'coda-api-page-item-container'; // Reuse class
+
+                const row = document.createElement('div');
+                row.className = 'coda-api-page-item';
+                
+                // Try to extract a title
+                let title = 'Untitled';
+                if (page.properties) {
+                    const titleProp = Object.values(page.properties).find(p => p.type === 'title');
+                    if (titleProp && titleProp.title && titleProp.title.length > 0) {
+                        title = titleProp.title[0].plain_text;
+                    }
+                }
+                
+                row.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${title}</span>`;
+                
+                row.addEventListener('click', () => openNotionApiPage(page, title, row));
+                
+                li.appendChild(row);
+                treeEl.appendChild(li);
+            });
+        }
+
+        function clearNotionApiTree() {
+            const notionSection = document.getElementById('notionSection');
+            const notionResizer = document.getElementById('notionResizer');
+            if (notionSection) notionSection.style.display = 'none';
+            if (notionResizer) notionResizer.style.display = 'none';
+
+            const treeEl = notionSection?.querySelector('.notion-api-tree');
+            if (treeEl) treeEl.remove();
+        }
+
+        async function openNotionApiPage(page, title, clickedEl) {
+            document.querySelectorAll('.coda-api-page-item').forEach(el => el.classList.remove('active'));
+            if (clickedEl) clickedEl.classList.add('active');
+
+            const tabId = `notion-api:${page.id}`;
+            const existing = openTabs.find(t => t.id === tabId);
+            if (existing) { setActiveTab(tabId); return; }
+
+            // Using Notion webview Option A for now
+            const pageUrl = page.url || `https://notion.so/${page.id.replace(/-/g, '')}`;
+
+            const tab = {
+                id: tabId,
+                name: title,
+                path: null,
+                handle: null,
+                isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+                isCoda: true, // Reuse coda webview mechanism for simplicity
+                codaId: tabId,
+                codaEmbedUrl: pageUrl,
+                content: '', rawContent: '', savedContent: '', dirty: false
+            };
+
+            openTabs.push(tab);
+            setActiveTab(tabId);
+            saveWorkspaceState();
+        }
+
+        // Expose so Phase 1 can also call openModal
+        window._openSettingsModal = openModal;
+    })();
+
+    // ============================================================
+    // CODA INTEGRATION — Webview Panel Controls
+    // ============================================================
+    (function () {
+        const codaPanel  = document.getElementById('codaPanel');
+        const codaFrame  = document.getElementById('codaFrame');
+
+        if (!codaPanel || !codaFrame) return;
+
+        // ---- Expose Coda panel switcher for setActiveTab ----
+        // webview uses loadURL() not .src assignment
+        window._showCodaPanel = (url) => {
+            codaPanel.style.display = 'flex';
+            // Use setAttribute for webview (more reliable than loadURL before dom-ready)
+            if (codaFrame.tagName === 'WEBVIEW' || codaFrame.getAttribute) {
+                const current = codaFrame.getAttribute('src');
+                if (current !== url) {
+                    codaFrame.setAttribute('src', url);
+                }
+            } else {
+                codaFrame.src = url;
+            }
+        };
+
+        window._hideCodaPanel = () => {
+            codaPanel.style.display = 'none';
+            // Don't navigate away — preserve the session so login persists
+        };
+    })();
+
+    // ============================================================
+    // FIND BAR (Cmd+F / Ctrl+F)
+    // ============================================================
+    (function () {
+        const findBar = document.getElementById('findBar');
+        const findInput = document.getElementById('findInput');
+        const findCount = document.getElementById('findCount');
+        const findPrev = document.getElementById('findPrev');
+        const findNext = document.getElementById('findNext');
+        const findClose = document.getElementById('findClose');
+
+        if (!findBar) return;
+
+        let matches = [];   // Array of <mark> elements
+        let currentIdx = -1;
+
+        function clearHighlights() {
+            // Replace each <mark> with its text content
+            markdownContent.querySelectorAll('mark.find-highlight').forEach(m => {
+                m.replaceWith(document.createTextNode(m.textContent));
+            });
+            // Merge adjacent text nodes to avoid fragmentation
+            markdownContent.normalize();
+            matches = [];
+            currentIdx = -1;
+            findCount.textContent = '';
+        }
+
+        function highlightQuery(query) {
+            clearHighlights();
+            if (!query) return;
+
+            const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const walker = document.createTreeWalker(markdownContent, NodeFilter.SHOW_TEXT, null);
+
+            const textNodes = [];
+            let node;
+            while ((node = walker.nextNode())) {
+                // Skip nodes inside the find bar
+                if (findBar.contains(node)) continue;
+                textNodes.push(node);
+            }
+
+            textNodes.forEach(textNode => {
+                const text = textNode.nodeValue;
+                if (!regex.test(text)) return;
+
+                regex.lastIndex = 0;
+                const frag = document.createDocumentFragment();
+                let lastIndex = 0;
+                let m;
+
+                while ((m = regex.exec(text)) !== null) {
+                    if (m.index > lastIndex) {
+                        frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+                    }
+                    const mark = document.createElement('mark');
+                    mark.className = 'find-highlight';
+                    mark.textContent = m[0];
+                    frag.appendChild(mark);
+                    matches.push(mark);
+                    lastIndex = regex.lastIndex;
+                }
+
+                if (lastIndex < text.length) {
+                    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+                }
+
+                textNode.replaceWith(frag);
+            });
+
+            updateCount();
+            if (matches.length > 0) navigateTo(0);
+        }
+
+        function navigateTo(index) {
+            if (matches.length === 0) return;
+            if (currentIdx >= 0 && currentIdx < matches.length) {
+                matches[currentIdx].classList.remove('find-current');
+            }
+            currentIdx = (index + matches.length) % matches.length;
+            matches[currentIdx].classList.add('find-current');
+            matches[currentIdx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+            updateCount();
+        }
+
+        function updateCount() {
+            if (matches.length === 0) {
+                findCount.textContent = findInput.value ? 'Sin resultados' : '';
+            } else {
+                findCount.textContent = `${currentIdx + 1} / ${matches.length}`;
+            }
+        }
+
+        function openFindBar() {
+            findBar.style.display = 'flex';
+            findInput.focus();
+            findInput.select();
+        }
+
+        function closeFindBar() {
+            findBar.style.display = 'none';
+            clearHighlights();
+        }
+
+        // Cmd+F / Ctrl+F
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+                e.preventDefault();
+                openFindBar();
+            }
+            if (e.key === 'Escape' && findBar.style.display !== 'none') {
+                e.preventDefault();
+                closeFindBar();
+            }
+        });
+
+        // Live search as user types (debounced)
+        let searchTimer = null;
+        findInput.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => highlightQuery(findInput.value), 150);
+        });
+
+        // Enter / Shift+Enter inside the input
+        findInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    navigateTo(currentIdx - 1);
+                } else {
+                    navigateTo(currentIdx + 1);
+                }
+            }
+        });
+
+        findNext.addEventListener('click', () => navigateTo(currentIdx + 1));
+        findPrev.addEventListener('click', () => navigateTo(currentIdx - 1));
+        findClose.addEventListener('click', closeFindBar);
+    })();
+
+    // --- EXPOSICIÓN DE API PARA VÍNCULO CON TERMINAL ---
+    window.app = {
+        setActiveTab: (id) => setActiveTab(id),
+        getActiveTabId: () => activeTabId,
+        getActiveTabName: () => {
+            const tab = openTabs.find(t => t.id === activeTabId);
+            return tab ? tab.name : null;
+        },
+        showCustomPrompt: (msg, def) => showCustomPrompt(msg, def)
+    };
+
+    // Registrar callback en el controlador de terminal para activación bidireccional
+    if (window.terminalCtrl) {
+        window.terminalCtrl.onTerminalActivated = (fileId) => {
+            // Buscamos si la tab ya está abierta (no debería ser necesario abrirla, solo activarla)
+            const exists = openTabs.some(t => t.id === fileId);
+            if (exists) {
+                // Pasamos un flag interno o simplemente confiamos en que chat.js 
+                // ya maneja la no-recursividad con su propio flag
+                setActiveTab(fileId);
+            }
+        };
+    }
 
 });

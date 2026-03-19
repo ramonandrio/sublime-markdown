@@ -31,10 +31,26 @@ Genera `dist/CompassAI-test.dmg`. Al abrirlo, la primera vez hay que hacer **cli
 Requiere un certificado de **Apple Developer** instalado en el Mac y las credenciales en `.env`.
 
 ```bash
-npm run build:mac
+npm run build:mac        # Apple Silicon (arm64)
+npm run build:mac:intel  # Intel (x64)
 ```
 
 Genera un DMG firmado y notarizado en `dist/`. Tus colegas pueden instalarlo sin ningún aviso de Gatekeeper.
+
+**Verificar que el build es correcto antes de distribuir:**
+```bash
+xcrun stapler validate dist/mac-arm64/CompassAI.app   # Confirma que el ticket de notarización está stapled
+spctl -a -vvv dist/mac-arm64/CompassAI.app            # Gatekeeper lo acepta: "source=Notarized Developer ID"
+```
+
+**Si el DMG muestra el icono roto o invisible en otro Mac:**
+El `dmg.contents` en `package.json` define explícitamente el layout (app izquierda, Applications derecha). Si electron-builder no genera bien el DMG por alguna razón, usa el script manual:
+```bash
+./scripts/make-dmg.sh
+```
+Requiere que Terminal tenga **Full Disk Access** (Ajustes del sistema → Privacidad y Seguridad → Acceso total al disco).
+
+> El universal binary (un solo DMG para ambas arquitecturas) no funciona con `node-pty` porque el module incluye prebuilds para ambas arquitecturas en ambos builds, y el merger de Electron no sabe resolverlo. La solución práctica es mantener dos DMGs separados.
 
 **Credenciales necesarias en `.env`:**
 ```
@@ -60,7 +76,8 @@ markdown-viewer/
 ├── scripts/
 │   ├── afterExtract.js             # Hook: limpia xattrs tras extraer Electron
 │   ├── clear-xattr.js              # Hook: limpia xattrs tras empaquetar
-│   └── notarize.js                 # Hook: notariza con Apple (solo build:mac)
+│   ├── notarize.js                 # Hook: notariza con Apple (solo build:mac)
+│   └── make-dmg.sh                 # Script manual para crear DMG si electron-builder falla
 ├── templates/compassai/            # Workspace PM-OS preconfigurado que se copia al crear workspace nuevo
 ├── build/
 │   └── icon.icns                   # Icono de la app

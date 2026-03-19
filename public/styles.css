@@ -63,8 +63,8 @@ body {
 /* --- PANEL LATERAL (Navegador) --- */
 .sidebar {
     width: 300px;
-    min-width: 0;
-    max-width: 400px;
+    min-width: 150px;
+    max-width: 800px;
     background-color: var(--bg-darker);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -79,39 +79,47 @@ body {
     border-right: none;
 }
 
-.sidebar-toggle {
-    background: var(--bg-darker);
-    border: none;
-    border-right: 1px solid var(--border-color);
-    color: var(--text-muted);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    padding: 0;
-    flex-shrink: 0;
-    transition: background-color 0.15s, color 0.15s;
-}
-
-.sidebar-toggle:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.sidebar-toggle svg {
-    transition: transform 0.2s ease;
-}
-
-.sidebar-toggle.collapsed svg {
-    transform: rotate(180deg);
-}
-
 .sidebar-header {
     padding: 12px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+/* Resizer Vertical */
+.vertical-resizer {
+    width: 6px;
+    background-color: transparent;
+    cursor: col-resize;
+    z-index: 10;
+    transition: background-color 0.2s;
+    margin-left: -3px;
+    margin-right: -3px;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.vertical-resizer:hover,
+.vertical-resizer.is-resizing {
+    background-color: var(--text-accent);
+}
+
+/* Resizer Horizontal (Sidebar) */
+.sidebar-horizontal-resizer {
+    height: 6px;
+    background-color: transparent;
+    cursor: row-resize;
+    z-index: 10;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+    margin-top: -3px;
+    margin-bottom: -3px;
+    position: relative;
+}
+
+.sidebar-horizontal-resizer:hover,
+.sidebar-horizontal-resizer.is-resizing {
+    background-color: var(--text-accent);
 }
 
 .sidebar-header h2 {
@@ -153,6 +161,11 @@ body {
     color: var(--text-primary);
 }
 
+.action-btn.active {
+    background-color: var(--bg-selection);
+    color: #fff;
+}
+
 .action-btn.btn-dirty {
     color: var(--text-accent);
 }
@@ -161,8 +174,9 @@ body {
     flex: 1;
     overflow-y: auto;
     overflow-x: auto;
-    padding: 0 10px 20px 0;
+    padding: 0 10px 10px 0;
     user-select: none;
+    min-height: 20%;
 }
 
 /* Elementos del Árbol */
@@ -174,11 +188,11 @@ body {
 .tree-item {
     display: flex;
     align-items: center;
-    padding: 6px 10px 6px 20px;
+    padding: 4px 10px 4px 20px;
     cursor: pointer;
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     transition: background-color 0.15s, color 0.15s;
     white-space: nowrap;
 }
@@ -226,7 +240,7 @@ body {
 }
 
 .chevron {
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     margin-right: 6px;
     opacity: 0.7;
     transition: transform 0.2s;
@@ -236,7 +250,7 @@ body {
 /* Iconos pseudo-elementos (simples colores por ahora) */
 .folder-icon::before {
     content: '📁';
-    font-size: 1rem;
+    font-size: 0.85rem;
     filter: grayscale(0.5);
 }
 
@@ -281,7 +295,7 @@ body {
 
 .file-icon::before {
     content: '📄';
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     filter: grayscale(0.8);
 }
 
@@ -322,16 +336,18 @@ body {
 .tab {
     display: flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 0 12px;
+    height: 36px;
     background-color: var(--bg-darker);
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     min-width: 120px;
     max-width: 200px;
     border-right: 1px solid var(--border-color);
     border-top: 2px solid transparent;
     cursor: pointer;
     transition: background-color 0.15s, color 0.15s;
+    box-sizing: border-box;
     display: none;
     /* Oculta por defecto hasta cargar archivo */
 }
@@ -376,22 +392,71 @@ body {
     color: var(--text-primary);
 }
 
+/* Tab drag reorder */
+.tab-dragging {
+    opacity: 0.4;
+}
+
+.tab-drag-over {
+    border-left: 2px solid var(--text-accent) !important;
+}
+
+.terminal-tab.tab-dragging {
+    opacity: 0.4;
+}
+
+.terminal-tab.tab-drag-over {
+    border-left: 2px solid var(--text-accent) !important;
+}
+
 /* --- EDITOR PANEL --- */
-#markdownEditor {
-    width: 100%;
-    height: 100%;
+.editor-with-lines {
+    display: flex;
     flex: 1;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+}
+
+.line-numbers {
+    flex-shrink: 0;
+    width: 52px;
+    padding: 40px 0 40px 0;
+    background-color: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.6;
+    text-align: right;
+    padding-right: 12px;
+    padding-left: 8px;
+    user-select: none;
+    overflow: hidden;
+    box-sizing: border-box;
+    border-right: 1px solid var(--border-color);
+    opacity: 0.5;
+}
+
+.line-numbers span {
+    display: block;
+}
+
+#markdownEditor {
+    flex: 1;
+    height: 100%;
     background-color: transparent;
     color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: 14px;
     line-height: 1.6;
-    padding: 40px;
+    padding: 40px 40px 40px 16px;
     border: none;
     resize: none;
     outline: none;
     white-space: pre-wrap;
     word-break: break-all;
+    overflow-y: auto;
+    box-sizing: border-box;
 }
 
 /* Contenedor Markdown Previsualización */
@@ -1164,11 +1229,6 @@ body {
         transform: translateX(-100%);
     }
 
-    /* Hide sidebar collapse button on mobile */
-    .sidebar-toggle {
-        display: none;
-    }
-
     /* Hide desktop-only elements */
     .desktop-only {
         display: none !important;
@@ -1434,11 +1494,6 @@ body {
     -webkit-app-region: no-drag;
 }
 
-.electron-mode .sidebar-toggle {
-    padding-top: 38px;
-    -webkit-app-region: drag;
-}
-
 /* =========================================
    CompassAI TERMINAL CHAT (FASE 2)
    ========================================= */
@@ -1449,6 +1504,8 @@ body {
     cursor: row-resize;
     z-index: 10;
     transition: background-color 0.2s;
+    margin-bottom: -4px;
+    flex-shrink: 0;
 }
 
 .horizontal-resizer:hover,
@@ -1509,6 +1566,34 @@ body {
     background-color: rgba(255, 255, 255, 0.4);
 }
 
+.terminal-tab-close:hover {
+    background-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+/* Claude Thinking Animation */
+.terminal-tab.claude-thinking .terminal-tab-name::before {
+    content: '';
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin-right: 6px;
+    border: 2px solid var(--text-accent);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: claude-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+@keyframes claude-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .terminal-tab.active {
     background-color: var(--bg-darker);
     color: var(--text-primary);
@@ -1527,9 +1612,16 @@ body {
     transition: background 0.2s, opacity 0.2s;
 }
 
-.terminal-tab-close:hover {
-    background-color: rgba(0, 0, 0, 0.1);
-    opacity: 1;
+.terminal-tab span.editing {
+    outline: 2px solid var(--text-accent);
+    outline-offset: 2px;
+    background: white;
+    padding: 0 4px;
+    border-radius: 2px;
+    cursor: text;
+    user-select: text;
+    min-width: 50px;
+    display: inline-block;
 }
 
 .terminal-actions {
@@ -1541,10 +1633,287 @@ body {
     flex: 1;
     overflow: hidden;
     position: relative;
-    background-color: var(--bg-dark);
+    background-color: var(--bg-dark); /* This is white in the current theme */
 }
 
-.terminal-view {
+/* Individual Tab Container (can be split) */
+.terminal-tab-view {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    flex-direction: column;
+    background-color: #ffffff;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.terminal-tab-view.active-view {
+    display: flex;
+}
+
+/* Actual xterm.js instance wrapper */
+.xterm-instance-container {
+    position: relative;
+    flex: 1;
+    height: 100%;
+    min-width: 100px;
+    overflow: hidden;
+    background-color: #ffffff;
+    padding: 10px;
+}
+
+/* Internal resizer between panes */
+.terminal-pane-resizer {
+    width: 1px;
+    background-color: var(--border-color);
+    cursor: col-resize;
+    z-index: 10;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.terminal-pane-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+}
+
+.terminal-pane-resizer:hover,
+.terminal-pane-resizer.is-resizing {
+    background-color: var(--text-accent);
+    width: 2px;
+}
+
+/* Ensure xterm fills its pane without forced backgrounds */
+.xterm-instance-container .xterm {
+    height: 100% !important;
+    outline: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPLIT PANES — estilo tmux
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Contenedores de split */
+/* 'h' = split horizontal = línea horizontal entre paneles = arriba/abajo */
+.pane-split-h {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* 'v' = split vertical = línea vertical entre paneles = lado a lado */
+.pane-split-v {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Nodo hoja — un pane individual */
+.pane-leaf {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #FAFAFA;
+}
+
+/* Borde de acento en el pane activo */
+.pane-leaf-active {
+    outline: 1.5px solid var(--text-accent, #36A3D9);
+    outline-offset: -1px;
+}
+
+/* Estado mientras se arrastra un archivo encima del pane */
+.pane-drop-target {
+    outline: 2px dashed var(--text-accent, #36A3D9);
+    outline-offset: -2px;
+    background: rgba(54, 163, 217, 0.05);
+}
+
+/* Cabecera de cada pane */
+.pane-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+    height: 24px;
+    flex-shrink: 0;
+    background: var(--bg-tertiary, #f0f0f0);
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    user-select: none;
+}
+
+.pane-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, monospace);
+    font-size: 10.5px;
+    color: var(--text-muted, #888);
+    cursor: default;
+}
+
+.pane-title.editing {
+    outline: 2px solid var(--text-accent, #36A3D9);
+    outline-offset: 2px;
+    background: white;
+    padding: 0 4px;
+    border-radius: 2px;
+    cursor: text;
+    user-select: text;
+    overflow: visible;
+    white-space: nowrap;
+}
+
+.pane-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.pane-leaf:hover .pane-header-actions {
+    opacity: 1;
+}
+
+/* Siempre visible en el pane activo */
+.pane-leaf-active .pane-header-actions {
+    opacity: 1;
+}
+
+/* Botones individuales del pane header */
+.pane-btn {
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    color: var(--text-muted, #888);
+    padding: 0;
+    font-size: 13px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.pane-btn:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.06));
+    color: var(--text-primary, #333);
+}
+
+.pane-close-btn {
+    font-size: 15px;
+    margin-left: 2px;
+}
+
+/* Área del terminal xterm dentro del pane */
+.pane-terminal {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    padding: 6px 8px;
+    background: #FAFAFA;
+}
+
+.pane-terminal .xterm {
+    height: 100% !important;
+    outline: none !important;
+    overflow: hidden !important;
+}
+
+/* El viewport y el canvas deben tener el mismo fondo que el theme.
+   Sin esto, el espacio no cubierto por celdas se muestra negro. */
+.pane-terminal .xterm-viewport {
+    background-color: #FAFAFA !important;
+    overflow-y: hidden !important;
+}
+
+.pane-terminal .xterm-screen {
+    background-color: #FAFAFA !important;
+}
+
+/* Divisores entre panes */
+/* pane-resizer-h: línea horizontal que separa paneles arriba/abajo */
+.pane-resizer-h {
+    height: 1px;
+    background: var(--border-color, #e0e0e0);
+    cursor: row-resize;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    transition: background 0.12s, height 0.12s;
+}
+
+.pane-resizer-h::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -4px;
+    bottom: -4px;
+}
+
+.pane-resizer-h:hover,
+.pane-resizer-h.is-resizing {
+    background: var(--text-accent, #36A3D9);
+    height: 2px;
+}
+
+/* pane-resizer-v: línea vertical que separa paneles lado a lado */
+.pane-resizer-v {
+    width: 1px;
+    background: var(--border-color, #e0e0e0);
+    cursor: col-resize;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    transition: background 0.12s, width 0.12s;
+}
+
+.pane-resizer-v::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    right: -4px;
+}
+
+.pane-resizer-v:hover,
+.pane-resizer-v.is-resizing {
+    background: var(--text-accent, #36A3D9);
+    width: 2px;
+}
+
+/* Scroll containers inside the terminal */
+.terminal-chat-container {
     position: absolute;
     top: 0;
     left: 0;
@@ -1627,4 +1996,554 @@ body {
     background-color: #f1f1f1;
     cursor: not-allowed;
     opacity: 0.7;
+}
+
+/* ---- Find Bar (Cmd+F) ---- */
+#findBar {
+    position: fixed;
+    top: 48px;
+    right: 16px;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-panel, #fff);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 8px;
+    padding: 5px 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    animation: findBarSlideIn 0.15s ease;
+}
+
+@keyframes findBarSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+#findInput {
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 5px;
+    padding: 4px 8px;
+    font-size: 13px;
+    width: 200px;
+    background: var(--bg-dark, #fff);
+    color: var(--text-color, #333);
+    outline: none;
+}
+
+#findInput:focus {
+    border-color: var(--accent-color, #0066ff);
+    box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.15);
+}
+
+#findCount {
+    font-size: 11px;
+    color: var(--text-muted, #888);
+    min-width: 50px;
+    text-align: center;
+}
+
+#findBar button {
+    background: none;
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-color, #333);
+    line-height: 1.4;
+    transition: background 0.1s;
+}
+
+#findBar button:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.07));
+}
+
+mark.find-highlight {
+    background: rgba(255, 210, 0, 0.55);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0;
+}
+
+mark.find-highlight.find-current {
+    background: rgba(255, 140, 0, 0.75);
+    outline: 2px solid rgba(255, 140, 0, 0.9);
+    border-radius: 2px;
+}
+
+/* ---- Coda Pages Sidebar Section ---- */
+.coda-section {
+    border-top: 1px solid var(--border-color);
+    padding: 8px 0 4px 0;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 20%;
+    overflow: hidden;
+}
+
+.coda-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 12px;
+}
+
+.coda-section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-weight: normal;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.coda-add-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.coda-add-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.coda-page-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.coda-page-item {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    transition: background 0.12s, color 0.12s;
+    position: relative;
+}
+
+.coda-page-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.coda-page-item.active {
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--text-accent, #3b82f6);
+}
+
+.coda-page-link {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.coda-page-icon {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.coda-page-remove {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 13px;
+    border-radius: 4px;
+    opacity: 0.7;
+}
+
+.coda-page-item:hover .coda-page-remove {
+    display: flex;
+}
+
+.coda-page-remove:hover {
+    color: #e53e3e;
+    opacity: 1;
+}
+
+.coda-add-form {
+    padding: 6px 12px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.coda-add-form input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 12px;
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    outline: none;
+}
+
+.coda-add-form input:focus {
+    border-color: var(--accent-color, #0066ff);
+}
+
+.coda-add-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.coda-btn-confirm, .coda-btn-cancel {
+    flex: 1;
+    border: none;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.15s;
+}
+
+.coda-btn-confirm {
+    background: var(--accent-color, #3b82f6);
+    color: white;
+}
+
+.coda-btn-confirm:hover { filter: brightness(1.1); }
+
+.coda-btn-cancel {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.coda-btn-cancel:hover { background: var(--bg-darker); }
+
+/* Coda iframe panel */
+#codaPanel {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#codaFrame {
+    width: 100%;
+    height: 100%;
+    border: none;
+    flex: 1;
+    display: block;
+}
+
+/* Tab icon for Coda tabs */
+.tab .coda-tab-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+/* ---- Settings Modal ---- */
+.settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: settingsFadeIn 0.15s ease;
+}
+
+@keyframes settingsFadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+.settings-modal {
+    background: #f5f5f0;
+    border: 1px solid #d8d8d0;
+    border-radius: 12px;
+    width: 520px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.25);
+    animation: settingsSlideIn 0.18s ease;
+    overflow: hidden;
+    color: #2d2d2d;
+}
+
+@keyframes settingsSlideIn {
+    from { opacity: 0; transform: translateY(-16px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px 16px;
+    border-bottom: 1px solid #e0dfd8;
+}
+
+.settings-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0;
+}
+
+.settings-close-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    transition: background 0.12s, color 0.12s;
+    line-height: 1;
+}
+
+.settings-close-btn:hover {
+    background: rgba(0,0,0,0.07);
+    color: #1a1a1a;
+}
+
+.settings-body {
+    overflow-y: auto;
+    flex: 1;
+    padding: 16px 22px 20px;
+}
+
+.settings-section {
+    margin-bottom: 24px;
+}
+
+.settings-section-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0dfd8;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-field label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+.settings-hint {
+    font-size: 0.78rem;
+    color: #777;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.settings-hint a {
+    color: var(--accent-color, #3b82f6);
+    text-decoration: none;
+}
+
+.settings-hint a:hover { text-decoration: underline; }
+
+.settings-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.settings-input-row input {
+    flex: 1;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.settings-input-row input:focus {
+    border-color: var(--accent-color, #3b82f6);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.settings-icon-btn {
+    background: none;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    padding: 6px 8px;
+    cursor: pointer;
+    color: #888;
+    display: flex;
+    align-items: center;
+    transition: background 0.1s, color 0.1s;
+}
+
+.settings-icon-btn:hover {
+    background: rgba(0,0,0,0.06);
+    color: #1a1a1a;
+}
+
+.settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.settings-btn-primary {
+    background: var(--accent-color, #3b82f6);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.12s;
+}
+
+.settings-btn-primary:hover { filter: brightness(1.1); }
+
+.settings-btn-danger {
+    background: none;
+    color: #e53e3e;
+    border: 1px solid #e53e3e40;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+
+.settings-btn-danger:hover { background: rgba(229, 62, 62, 0.08); }
+
+.settings-status {
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.settings-status.ok   { color: #38a169; }
+.settings-status.err  { color: #e53e3e; }
+
+/* Coda API tree items (under Coda section in sidebar) */
+.coda-api-tree {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.coda-api-doc {
+    margin-bottom: 2px;
+}
+
+.coda-api-doc-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s, color 0.1s;
+}
+
+.coda-api-doc-header:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.coda-api-doc-header svg { flex-shrink: 0; }
+
+.coda-api-pages {
+    list-style: none;
+    padding: 0 0 0 18px;
+    margin: 0;
+    display: none;
+}
+
+.coda-api-doc.expanded > .coda-api-pages { display: block; }
+
+.coda-api-page-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s, color 0.1s;
+}
+
+.coda-api-page-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.coda-api-page-item.active {
+    color: var(--text-accent, #3b82f6);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.coda-folder-icon {
+    transition: transform 0.15s ease-in-out;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+.coda-folder-icon:hover {
+    background: rgba(100, 100, 100, 0.2);
+}
+
+.coda-api-page-item-container {
+    display: flex;
+    flex-direction: column;
 }

@@ -1,647 +1,771 @@
 /**
- * CHAT.JS - Gestor del Terminal (Fase 4: xterm.js)
+ * CHAT.JS - Terminal con split de paneles estilo tmux
+ *
+ * Para revertir: cp chat.js.pre-split-backup chat.js && cp styles.css.pre-split-backup styles.css
+ *
+ * Atajos de teclado (cuando el panel de terminal está abierto):
+ *   Ctrl+Shift+D  →  dividir horizontalmente (izquierda / derecha)
+ *   Ctrl+Shift+E  →  dividir verticalmente   (arriba / abajo)
+ *   Ctrl+Shift+W  →  cerrar panel activo
  */
 
 let Terminal, FitAddon;
 
-if (typeof window.require !== 'undefined') {
-    Terminal = window.require('@xterm/xterm').Terminal;
-    FitAddon = window.require('@xterm/addon-fit').FitAddon;
+function loadTerminalLibs() {
+    if (Terminal) return true;
+    try {
+        if (typeof window.require !== 'undefined') {
+            const xterm = window.require('@xterm/xterm');
+            Terminal = xterm.Terminal || xterm;
+            FitAddon = window.require('@xterm/addon-fit').FitAddon;
+            return !!Terminal;
+        }
+    } catch (e) { console.error('Error xterm libs:', e); }
+    return false;
 }
 
+// Tema de color compartido por todos los terminales
+const TERM_THEME = {
+    background: '#FAFAFA',
+    foreground: '#5C6166',
+    cursor: '#F29718',
+    cursorAccent: '#FAFAFA',
+    selectionBackground: 'rgba(54, 163, 217, 0.2)',
+    black:   '#5C6166', red:     '#F07178', green:   '#86B300', yellow:  '#F29718',
+    blue:    '#36A3D9', magenta: '#A37ACC', cyan:    '#4CBF99', white:   '#8A9199',
+    brightBlack: '#ADB1B8', brightRed:     '#F07178', brightGreen:   '#86B300',
+    brightYellow: '#F29718', brightBlue:   '#36A3D9', brightMagenta: '#A37ACC',
+    brightCyan:   '#4CBF99', brightWhite:  '#D5D8DA'
+};
+
+// =============================================================================
+// TerminalController
+// =============================================================================
 class TerminalController {
     constructor() {
-        this.instances = new Map(); // id -> { id, domBody, tabBtn, term, fitAddon, resizeObserver }
-        this.activeInstanceId = null;
-        this.isElectron = typeof window.require !== 'undefined';
-        this.ipcRenderer = this.isElectron ? window.require('electron').ipcRenderer : null;
+        // tabs:  tabId → { tabId, tabBtn, containerEl, rootNode, activeLeafPtyId, linkedFileId }
+        this.tabs  = new Map();
+        // panes: ptyId → { ptyId, term, fit, leafNode, tabId, linkedFileId }
+        this.panes = new Map();
+        this.activeTabId = null;
+        this._skipNotify = false;
 
-        this.initDOM();
-        this.bindEvents();
-        this.setupIPC();
+        this.ipcRenderer = (typeof window.require !== 'undefined')
+            ? window.require('electron').ipcRenderer : null;
+
+        // Callback para comunicación bidireccional con app.js
+        this.onTerminalActivated = null;
+
+        const init = () => {
+            this.panel          = document.getElementById('bottomTerminalPanel');
+            this.resizer        = document.getElementById('horizontalResizer');
+            this.tabsContainer  = document.getElementById('terminalTabsContainer');
+            this.bodyContainer  = document.getElementById('terminalBodyContainer');
+
+            document.getElementById('newTerminalBtn')
+                ?.addEventListener('click', () => this.createTab());
+            document.getElementById('closeTerminalPanelBtn')
+                ?.addEventListener('click', () => this.closeAll());
+
+            // Botón "Adjuntar" de la toolbar: abre picker nativo y envía rutas al pane activo
+            document.getElementById('toolbarAttachBtn')
+                ?.addEventListener('click', () => this._attachFilesFromPicker());
+
+            this._initPanelResizer();
+            this._initIpc();
+            this._initKeyboard();
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
     }
 
-    initDOM() {
-        this.panel = document.getElementById('bottomTerminalPanel');
-        this.resizer = document.getElementById('horizontalResizer');
-        this.tabsContainer = document.getElementById('terminalTabsContainer');
-        this.bodyContainer = document.getElementById('terminalBodyContainer');
+    // ── IPC ──────────────────────────────────────────────────────────────────
+    _initIpc() {
+        if (!this.ipcRenderer) return;
 
-        // Hide legacy input if present
-        const inputArea = document.querySelector('.terminal-input-area');
-        if (inputArea) inputArea.style.display = 'none';
+        this.ipcRenderer.on('terminal-output', (event, { id, data }) => {
+            const pane = this.panes.get(id);
+            if (pane) pane.term.write(data);
+        });
 
-        this.newTerminalBtn = document.getElementById('newTerminalBtn');
-        this.closePanelBtn = document.getElementById('closeTerminalPanelBtn');
-        this.toolbarClaudeBtn = document.getElementById('toolbarClaudeBtn');
-        this.toolbarSkillsBtn = document.getElementById('toolbarSkillsBtn');
-        this.toolbarSetupBtn = document.getElementById('toolbarSetupBtn');
-        this.toolbarPrdBtn = document.getElementById('toolbarPrdBtn');
-        this.toolbarAttachBtn = document.getElementById('toolbarAttachBtn');
-        this.splitViewContainer = document.querySelector('.split-view-container');
-
-        this.isResizing = false;
-        this.lastY = 0;
+        this.ipcRenderer.on('terminal-exit', (event, { id }) => {
+            // El PTY terminó inesperadamente
+            if (this.panes.has(id)) this.closePane(id);
+        });
     }
 
-    bindEvents() {
-        if (!this.panel) return;
+    // ── Atajos de teclado ─────────────────────────────────────────────────────
+    _initKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            if (!this.activeTabId) return;
+            if (this.panel.style.display === 'none') return;
+            const tab = this.tabs.get(this.activeTabId);
+            if (!tab?.activeLeafPtyId) return;
 
-        this.newTerminalBtn.addEventListener('click', () => this.createNewInstance());
-        this.closePanelBtn.addEventListener('click', () => this.togglePanel(false));
+            if (e.ctrlKey && e.shiftKey) {
+                if (e.key === 'D') { e.preventDefault(); this.splitPane(tab.activeLeafPtyId, 'h'); }
+                if (e.key === 'E') { e.preventDefault(); this.splitPane(tab.activeLeafPtyId, 'v'); }
+                if (e.key === 'W') { e.preventDefault(); this.closePane(tab.activeLeafPtyId); }
+            }
+        });
+    }
 
-        if (this.toolbarClaudeBtn) {
-            this.toolbarClaudeBtn.addEventListener('click', () => {
-                if (this.activeInstanceId && this.ipcRenderer) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (!inst) return;
-
-                    if (!inst.isClaudeActive) {
-                        this.ipcRenderer.send('terminal-input', {
-                            id: this.activeInstanceId,
-                            input: 'claude --dangerously-skip-permissions\r'
-                        });
-                        inst.isClaudeActive = true;
-                    } else {
-                        // Si Claude está corriendo, enviar /exit
-                        this.ipcRenderer.send('terminal-input', {
-                            id: this.activeInstanceId,
-                            input: '/exit'
-                        });
-                        inst.isClaudeActive = false;
-                    }
-
-                    this.updateClaudeBtnUI();
-
-                    if (inst.term) {
-                        inst.term.focus();
-                    }
-                }
-            });
-        }
-
-        if (this.toolbarSkillsBtn) {
-            this.toolbarSkillsBtn.addEventListener('click', () => {
-                if (this.activeInstanceId && this.ipcRenderer) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (!inst || !inst.isClaudeActive) return;
-
-                    this.ipcRenderer.send('terminal-input', {
-                        id: this.activeInstanceId,
-                        input: '/skills'
-                    });
-
-                    if (inst.term) {
-                        inst.term.focus();
-                    }
-                }
-            });
-        }
-
-        if (this.toolbarSetupBtn) {
-            this.toolbarSetupBtn.addEventListener('click', () => {
-                if (this.activeInstanceId && this.ipcRenderer) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (!inst || !inst.isClaudeActive) return;
-
-                    this.ipcRenderer.send('terminal-input', {
-                        id: this.activeInstanceId,
-                        input: '/setup'
-                    });
-
-                    if (inst.term) {
-                        inst.term.focus();
-                    }
-                }
-            });
-        }
-
-        if (this.toolbarPrdBtn) {
-            this.toolbarPrdBtn.addEventListener('click', () => {
-                if (this.activeInstanceId && this.ipcRenderer) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (!inst || !inst.isClaudeActive) return;
-
-                    this.ipcRenderer.send('terminal-input', {
-                        id: this.activeInstanceId,
-                        input: '/prd-draft'
-                    });
-
-                    if (inst.term) {
-                        inst.term.focus();
-                    }
-                }
-            });
-        }
-
-        if (this.toolbarAttachBtn) {
-            this.toolbarAttachBtn.addEventListener('click', async () => {
-                if (this.activeInstanceId && this.ipcRenderer) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (!inst || !inst.isClaudeActive) return;
-
-                    const filePaths = await this.ipcRenderer.invoke('select-file');
-                    if (filePaths && filePaths.length > 0) {
-                        this.insertFilePaths(filePaths);
-                    }
-                }
-            });
-        }
+    // ── Resizer del panel principal (entre content y terminal) ────────────────
+    _initPanelResizer() {
+        let isResizing = false;
 
         this.resizer.addEventListener('mousedown', (e) => {
-            this.isResizing = true;
-            this.lastY = e.clientY;
-            this.resizer.classList.add('is-resizing');
+            isResizing = true;
             document.body.style.cursor = 'row-resize';
-            document.body.style.userSelect = 'none';
+            this.resizer.classList.add('is-resizing');
+            e.preventDefault();
         });
 
         document.addEventListener('mousemove', (e) => {
-            if (!this.isResizing) return;
-            const deltaY = e.clientY - this.lastY;
-            this.lastY = e.clientY;
-
-            const currentHeight = this.panel.offsetHeight;
-            const newHeight = Math.max(100, currentHeight - deltaY);
-
-            if (newHeight < window.innerHeight - 100) {
-                this.panel.style.height = `${newHeight}px`;
+            if (!isResizing) return;
+            const newH = window.innerHeight - e.clientY;
+            if (newH > 100 && newH < window.innerHeight * 0.8) {
+                this.panel.style.height = `${newH}px`;
+                this._fitAllVisible();
             }
         });
 
         document.addEventListener('mouseup', () => {
-            if (this.isResizing) {
-                this.isResizing = false;
-                this.resizer.classList.remove('is-resizing');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-
-                // Disparar resize de la terminal activa al soltar el resizer
-                if (this.activeInstanceId) {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (inst && inst.fitAddon) {
-                        inst.fitAddon.fit();
-                        this.ipcRenderer.send('terminal-resize', {
-                            id: inst.id, cols: inst.term.cols, rows: inst.term.rows
-                        });
-                    }
-                }
-            }
-        });
-
-        // Window resize global debounce
-        window.addEventListener('resize', () => {
-            if (this.activeInstanceId) {
-                clearTimeout(this.resizeTimeout);
-                this.resizeTimeout = setTimeout(() => {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (inst && inst.fitAddon && this.panel.style.display !== 'none') {
-                        inst.fitAddon.fit();
-                        this.ipcRenderer.send('terminal-resize', {
-                            id: inst.id, cols: inst.term.cols, rows: inst.term.rows
-                        });
-                    }
-                }, 100);
-            }
+            if (!isResizing) return;
+            isResizing = false;
+            document.body.style.cursor = 'default';
+            this.resizer.classList.remove('is-resizing');
+            this._fitAllVisible();
         });
     }
 
-    setupIPC() {
+    // ── Crear nueva pestaña con un único pane ─────────────────────────────────
+    async createTab(options = {}) {
+        if (!loadTerminalLibs()) return;
         if (!this.ipcRenderer) return;
 
-        this.ipcRenderer.on('terminal-output', (event, { id, data, type }) => {
-            if (this.instances.has(id)) {
-                const inst = this.instances.get(id);
-
-                // Always write data to the terminal so nothing is swallowed
-                inst.term.write(data);
-
-                if (type === 'auth_error' && inst.isClaudeActive && !inst._authAlertShown) {
-                    // Only show the alert when Claude was running (not during login flow)
-                    inst._authAlertShown = true;
-                    inst.isClaudeActive = false;
-                    this.updateClaudeBtnUI();
-
-                    setTimeout(() => {
-                        window.alert('Tu sesión de Claude CLI ha expirado.\nDebes escribir /login en la terminal y pulsar Enter para volver a identificarte con tu cuenta Pro/Team.');
-                        inst._authAlertShown = false;
-                    }, 500);
-                } else if (inst.isClaudeActive && typeof data === 'string') {
-                    // Detect when Claude exits back to the shell prompt
-                    const claudeExitPatterns = [
-                        'Bye!',               // Claude CLI farewell message
-                        '> Human:',           // some versions echo this on exit
-                        '\x1b[?25h\r\n$',     // bash prompt reappearing
-                    ];
-                    const exited = claudeExitPatterns.some(p => data.includes(p));
-                    if (exited) {
-                        inst.isClaudeActive = false;
-                        this.updateClaudeBtnUI();
-                    }
-                }
-            }
-        });
-
-        this.ipcRenderer.on('terminal-exit', (event, { id, code }) => {
-            if (this.instances.has(id)) {
-                const inst = this.instances.get(id);
-                inst.term.writeln(`\r\n[Proceso terminado con código ${code}]`);
-
-                // When the shell (bash) dies, Claude is also gone by definition.
-                // Reset the flag so the toolbar shows "Arrancar Claude" again.
-                if (inst.isClaudeActive) {
-                    inst.isClaudeActive = false;
-                    if (this.activeInstanceId === id) {
-                        this.updateClaudeBtnUI();
-                    }
-                }
-            }
-        });
-    }
-
-    togglePanel(show) {
-        if (show) {
-            this.panel.style.display = 'flex';
-            this.resizer.style.display = 'block';
-
-            // Refit al mostrar
-            if (this.activeInstanceId) {
-                setTimeout(() => {
-                    const inst = this.instances.get(this.activeInstanceId);
-                    if (inst && inst.fitAddon) {
-                        inst.fitAddon.fit();
-                        const nameSpan = inst.tabBtn.querySelector('.terminal-tab-name');
-                        if (!nameSpan || nameSpan.contentEditable !== 'true') {
-                            inst.term.focus();
-                        }
-                    }
-                }, 50);
-            }
-        } else {
-            this.panel.style.display = 'none';
-            this.resizer.style.display = 'none';
+        // Auto-vincular con el archivo activo (igual que antes)
+        if (!options.fileId && window.app?.getActiveTabId) {
+            const id   = window.app.getActiveTabId();
+            const name = window.app.getActiveTabName();
+            const alreadyLinked = [...this.panes.values()].some(p => p.linkedFileId === id);
+            if (id && !alreadyLinked) { options.fileId = id; options.fileName = name; }
         }
+
+        const tabId = crypto.randomUUID();
+        const label = options.fileName || 'Terminal';
+
+        // Botón de pestaña
+        const tabBtn = document.createElement('div');
+        tabBtn.className = 'terminal-tab';
+        tabBtn.dataset.tabId = tabId;
+        tabBtn.innerHTML = `<span class="terminal-tab-name">${label}</span><div class="terminal-tab-close">×</div>`;
+
+        let clickTimer = null;
+        tabBtn.addEventListener('click', (e) => {
+            if (e.target.classList.contains('terminal-tab-close')) {
+                this.closeTab(tabId);
+                return;
+            }
+            const span = tabBtn.querySelector('span');
+            if (span.contentEditable === 'true') return;
+
+            if (clickTimer) {
+                clearTimeout(clickTimer);
+                clickTimer = null;
+            } else {
+                clickTimer = setTimeout(() => {
+                    this.switchTab(tabId);
+                    clickTimer = null;
+                }, 250);
+            }
+        });
+
+        tabBtn.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+            this._renameTab(tabId);
+        });
+
+        this.tabsContainer.appendChild(tabBtn);
+
+        // Contenedor de la pestaña (fill absolute en terminal-body)
+        const containerEl = document.createElement('div');
+        containerEl.className = 'terminal-tab-view';
+        this.bodyContainer.appendChild(containerEl);
+
+        const tab = {
+            tabId,
+            tabBtn,
+            containerEl,
+            rootNode: null,
+            activeLeafPtyId: null,
+            linkedFileId: options.fileId || null
+        };
+        this.tabs.set(tabId, tab);
+
+        // Mostrar panel
+        this.panel.style.display = 'flex';
+        this.resizer.style.display = 'block';
+
+        // Lanzar PTY
+        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        if (!ptyRes?.ok) { this.closeTab(tabId); return; }
+
+        // Crear nodo hoja y montarlo
+        const leafNode = this._makeLeafNode(ptyRes.id, tabId, options);
+        tab.rootNode = leafNode;
+        containerEl.appendChild(leafNode.el);
+
+        this.switchTab(tabId);
+
+        // Doble RAF: asegura que el layout está pintado antes de medir el contenedor
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            this._fitLeaf(leafNode);
+            this.panes.get(ptyRes.id)?.term.focus();
+        }));
     }
 
-    openTerminal() {
-        this.createNewInstance();
+    // ── Crear nodo hoja: un PTY + xterm ──────────────────────────────────────
+    _makeLeafNode(ptyId, tabId, options = {}) {
+        const leafNode = { type: 'leaf', ptyId, el: null, termEl: null, parent: null };
+
+        // Contenedor del pane
+        const el = document.createElement('div');
+        el.className = 'pane-leaf';
+        el.dataset.ptyId = ptyId;
+
+        // Cabecera del pane
+        const header = document.createElement('div');
+        header.className = 'pane-header';
+        header.innerHTML = `
+            <span class="pane-title">${options.fileName || 'Terminal'}</span>
+            <div class="pane-header-actions">
+                <button class="pane-btn pane-split-h-btn" title="Dividir horizontalmente — arriba/abajo (Ctrl+Shift+D)">
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
+                        <line x1="0.5" y1="5.5" x2="10.5" y2="5.5"/>
+                    </svg>
+                </button>
+                <button class="pane-btn pane-split-v-btn" title="Dividir verticalmente — lado a lado (Ctrl+Shift+E)">
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
+                        <line x1="5.5" y1="0.5" x2="5.5" y2="10.5"/>
+                    </svg>
+                </button>
+                <button class="pane-btn pane-close-btn" title="Cerrar pane (Ctrl+Shift+W)">×</button>
+            </div>`;
+
+        // Área del terminal xterm
+        const termEl = document.createElement('div');
+        termEl.className = 'pane-terminal';
+
+        el.appendChild(header);
+        el.appendChild(termEl);
+
+        leafNode.el     = el;
+        leafNode.termEl = termEl;
+
+        // Motor xterm.js
+        const term = new Terminal({
+            cursorBlink: true,
+            fontFamily:  'JetBrains Mono, Menlo, Monaco, Courier New, monospace',
+            fontSize:    13,
+            lineHeight:  1.2,
+            theme:       TERM_THEME,
+            convertEol:  true
+        });
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        term.open(termEl);
+        term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
+
+        this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null });
+
+        // Activar pane al hacer click en él
+        el.addEventListener('mousedown', () => this._setActiveLeaf(tabId, ptyId));
+
+        // Doble click en el título → renombrar pane
+        const titleEl = header.querySelector('.pane-title');
+        titleEl.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            this._renamePaneTitle(titleEl);
+        });
+
+        // Botones de split y cierre
+        header.querySelector('.pane-split-h-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.splitPane(ptyId, 'h');
+        });
+        header.querySelector('.pane-split-v-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.splitPane(ptyId, 'v');
+        });
+        header.querySelector('.pane-close-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.closePane(ptyId);
+        });
+
+        // ── Drag-and-drop: desde sidebar (text/plain) o desde el Finder/OS (Files) ──
+        el.addEventListener('dragover', (e) => {
+            const types = e.dataTransfer.types;
+            if (!types.includes('text/plain') && !types.includes('Files') && !types.includes('text/uri-list')) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            el.classList.add('pane-drop-target');
+        });
+
+        el.addEventListener('dragleave', (e) => {
+            if (!el.contains(e.relatedTarget)) {
+                el.classList.remove('pane-drop-target');
+            }
+        });
+
+        // Captura en fase de captura para interceptar ANTES de que xterm.js
+        // consuma el drop en su canvas y llame a stopPropagation
+        el.addEventListener('drop', (e) => {
+            const types = e.dataTransfer.types;
+            const hasFiles = (e.dataTransfer.files?.length > 0)
+                || types.includes('text/uri-list')
+                || types.includes('text/plain');
+            if (!hasFiles) return; // drops no-archivo: dejar que xterm los gestione
+
+            e.preventDefault();
+            e.stopPropagation(); // evitar que xterm también los procese
+            el.classList.remove('pane-drop-target');
+
+            // 1. File.path — propiedad de Electron en objetos File del SO
+            if (e.dataTransfer.files?.length > 0) {
+                const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+                if (paths.length > 0) { this._sendPathToPane(ptyId, ...paths); return; }
+            }
+
+            // 2. text/uri-list — fallback macOS/Linux (file:///ruta)
+            const uriList = e.dataTransfer.getData('text/uri-list');
+            if (uriList) {
+                const paths = uriList.split(/\r?\n/)
+                    .map(u => u.trim())
+                    .filter(u => u.startsWith('file://') && !u.startsWith('#'))
+                    .map(u => { try { return decodeURIComponent(new URL(u).pathname); } catch { return null; } })
+                    .filter(Boolean);
+                if (paths.length > 0) { this._sendPathToPane(ptyId, ...paths); return; }
+            }
+
+            // 3. text/plain — ruta directa del sidebar
+            const filePath = e.dataTransfer.getData('text/plain');
+            if (filePath) this._sendPathToPane(ptyId, filePath);
+        }, true /* capture */);
+
+        return leafNode;
     }
 
-    async createNewInstance() {
-        if (!this.ipcRenderer || !Terminal) {
-            alert('Las terminales reales solo están disponibles en modo nativo (CompassAI).');
+    // ── Enviar ruta(s) al PTY de un pane ─────────────────────────────────────
+    _sendPathToPane(ptyId, ...paths) {
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+
+        // Activa el pane receptor y mueve el foco
+        const tab = this.tabs.get(pane.tabId);
+        if (tab) this._setActiveLeaf(pane.tabId, ptyId);
+        pane.term.focus();
+
+        // Escapa y concatena las rutas con espacios (sin \r: el usuario decide cuándo ejecutar)
+        const text = paths.map(p => `"${p}"`).join(' ');
+        this.ipcRenderer?.send('terminal-input', { id: ptyId, input: text });
+    }
+
+    // ── Attach desde picker nativo (botón toolbarAttachBtn) ──────────────────
+    async _attachFilesFromPicker() {
+        if (!this.ipcRenderer) return;
+        const activeId = this.getActiveTerminalId();
+        if (!activeId) return;
+
+        const filePaths = await this.ipcRenderer.invoke('select-file');
+        if (!filePaths || filePaths.length === 0) return;
+
+        this._sendPathToPane(activeId, ...filePaths);
+    }
+
+    // ── Dividir un pane ───────────────────────────────────────────────────────
+    async splitPane(ptyId, dir) {
+        if (!this.ipcRenderer) return;
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+        const tab = this.tabs.get(pane.tabId);
+        if (!tab) return;
+
+        const oldLeaf = pane.leafNode;
+
+        // Lanzar nuevo PTY
+        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        if (!ptyRes?.ok) return;
+
+        const newLeaf = this._makeLeafNode(ptyRes.id, pane.tabId);
+
+        // Construir nodo split
+        const splitEl = document.createElement('div');
+        splitEl.className = dir === 'h' ? 'pane-split-h' : 'pane-split-v';
+
+        const resizerEl = document.createElement('div');
+        resizerEl.className = dir === 'h' ? 'pane-resizer-h' : 'pane-resizer-v';
+
+        const splitNode = {
+            type: 'split',
+            dir,
+            ratio: 0.5,
+            children: [oldLeaf, newLeaf],
+            el: splitEl,
+            resizerEl,
+            parent: oldLeaf.parent
+        };
+
+        oldLeaf.parent = splitNode;
+        newLeaf.parent = splitNode;
+
+        // Aplicar flex inicial (50/50)
+        this._applyRatio(splitNode);
+
+        // Sustituir en el DOM PRIMERO (mientras oldLeaf.el aún es hijo de su padre actual)
+        const parentNode = splitNode.parent;
+        if (!parentNode) {
+            // El leaf era la raíz — containerEl.replaceChildren saca oldLeaf.el del DOM
+            tab.rootNode = splitNode;
+            tab.containerEl.replaceChildren(splitEl);
+        } else {
+            // replaceChild requiere que oldLeaf.el sea hijo de parentNode.el en este momento
+            const idx = parentNode.children.indexOf(oldLeaf);
+            parentNode.children[idx] = splitNode;
+            parentNode.el.replaceChild(splitEl, oldLeaf.el);
+        }
+
+        // Ahora sí podemos meter oldLeaf.el dentro de splitEl (ya está desconectado de su padre anterior)
+        splitEl.appendChild(oldLeaf.el);
+        splitEl.appendChild(resizerEl);
+        splitEl.appendChild(newLeaf.el);
+
+        this._initPaneResizer(splitNode);
+
+        // Doble RAF: espera a que el layout esté estable antes de medir y hacer fit
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            this._fitLeaf(oldLeaf);
+            this._fitLeaf(newLeaf);
+            this._setActiveLeaf(pane.tabId, ptyRes.id);
+            this.panes.get(ptyRes.id)?.term.focus();
+        }));
+    }
+
+    // ── Cerrar un pane ────────────────────────────────────────────────────────
+    closePane(ptyId) {
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+
+        this.ipcRenderer?.send('terminal-kill', { id: ptyId });
+        pane.term.dispose();
+        this.panes.delete(ptyId);
+
+        const leafNode    = pane.leafNode;
+        const parentSplit = leafNode.parent;
+
+        if (!parentSplit) {
+            // Era el único pane → cerrar la pestaña completa
+            this.closeTab(pane.tabId);
             return;
         }
 
-        this.togglePanel(true);
+        // Encontrar el hermano
+        const siblingIdx = parentSplit.children[0] === leafNode ? 1 : 0;
+        const sibling    = parentSplit.children[siblingIdx];
 
-        const currentDir = window.appCtrl && window.appCtrl.currentRootDir
-            ? window.appCtrl.currentRootDir
-            : null;
+        // El hermano sube al lugar del split padre
+        sibling.parent       = parentSplit.parent;
+        sibling.el.style.flex      = '';
+        sibling.el.style.minWidth  = '';
+        sibling.el.style.minHeight = '';
 
-        const res = await this.ipcRenderer.invoke('terminal-start', {
-            cwd: currentDir
-            // omitted command so it defaults to process.env.SHELL on the backend
-        });
+        const grandParent = parentSplit.parent;
+        const tab = this.tabs.get(pane.tabId);
 
-        if (res.success) {
-            let tabName = `Terminal ${this.instances.size + 1}`;
-            if (window.appCtrl && window.appCtrl.getActiveTabName) {
-                const activeName = window.appCtrl.getActiveTabName();
-                if (activeName) {
-                    tabName = activeName;
-                }
-            }
-            this.createInstanceUI(res.id, tabName);
-            this.setActiveInstance(res.id);
+        if (!grandParent) {
+            tab.rootNode = sibling;
+            tab.containerEl.replaceChildren(sibling.el);
         } else {
-            alert('Error iniciando terminal: ' + res.error);
+            const idx = grandParent.children.indexOf(parentSplit);
+            grandParent.children[idx] = sibling;
+            grandParent.el.replaceChild(sibling.el, parentSplit.el);
+        }
+
+        // Activar el primer leaf disponible
+        const firstLeaf = this._firstLeaf(tab.rootNode);
+        if (firstLeaf) {
+            setTimeout(() => {
+                this._setActiveLeaf(pane.tabId, firstLeaf.ptyId);
+                this._fitAllInNode(tab.rootNode);
+                this.panes.get(firstLeaf.ptyId)?.term.focus();
+            }, 50);
         }
     }
 
-    createInstanceUI(id, name) {
-        // Tab Btn
-        const tabBtn = document.createElement('div');
-        tabBtn.className = 'terminal-tab';
-        tabBtn.innerHTML = `
-            <span title="Doble clic para renombrar" class="terminal-tab-name">${name}</span>
-            <div class="terminal-tab-close" title="Cerrar"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></div>
-        `;
+    // ── Cerrar una pestaña completa ───────────────────────────────────────────
+    closeTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
 
-        const nameSpan = tabBtn.querySelector('.terminal-tab-name');
+        // Matar todos los PTYs de la pestaña
+        [...this.panes.values()]
+            .filter(p => p.tabId === tabId)
+            .forEach(p => {
+                this.ipcRenderer?.send('terminal-kill', { id: p.ptyId });
+                p.term.dispose();
+                this.panes.delete(p.ptyId);
+            });
 
-        // Lógica para renombrar
-        nameSpan.addEventListener('dblclick', (e) => {
+        tab.tabBtn.remove();
+        tab.containerEl.remove();
+        this.tabs.delete(tabId);
+
+        if (this.tabs.size === 0) {
+            this.panel.style.display  = 'none';
+            this.resizer.style.display = 'none';
+            this.activeTabId = null;
+        } else {
+            // Activar la siguiente pestaña disponible
+            const nextId = [...this.tabs.keys()].at(-1);
+            this.switchTab(nextId);
+        }
+    }
+
+    // ── Cambiar pestaña activa ────────────────────────────────────────────────
+    switchTab(tabId) {
+        this.activeTabId = tabId;
+
+        this.tabs.forEach((tab, id) => {
+            const isActive = id === tabId;
+            tab.tabBtn.classList.toggle('active', isActive);
+            tab.containerEl.style.display = isActive ? 'flex' : 'none';
+        });
+
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        const leafPtyId = tab.activeLeafPtyId ?? this._firstLeaf(tab.rootNode)?.ptyId;
+        if (leafPtyId) {
+            setTimeout(() => {
+                this._setActiveLeaf(tabId, leafPtyId);
+                this._fitAllInNode(tab.rootNode);
+                this.panes.get(leafPtyId)?.term.focus();
+            }, 50);
+        }
+
+        // Notificar a app.js para la vinculación bidireccional con archivos
+        if (!this._skipNotify && tab.linkedFileId && typeof this.onTerminalActivated === 'function') {
+            this.onTerminalActivated(tab.linkedFileId);
+        }
+    }
+
+    // ── Marcar leaf como activo (foco visual) ─────────────────────────────────
+    _setActiveLeaf(tabId, ptyId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+        tab.activeLeafPtyId = ptyId;
+
+        // Actualizar borde de acento en todos los leaves del tab
+        this._walkLeaves(tab.rootNode, (leaf) => {
+            leaf.el.classList.toggle('pane-leaf-active', leaf.ptyId === ptyId);
+        });
+    }
+
+    // ── Resizer entre panes ───────────────────────────────────────────────────
+    _initPaneResizer(splitNode) {
+        splitNode.resizerEl.addEventListener('mousedown', (e) => {
+            e.preventDefault();
             e.stopPropagation();
-            nameSpan.contentEditable = 'true';
-            nameSpan.focus();
 
-            // Seleccionar todo el texto
-            const selection = window.getSelection();
+            // 'h' = split horizontal = línea horizontal = paneles arriba/abajo → arrastrar en Y
+            // 'v' = split vertical   = línea vertical   = paneles lado a lado  → arrastrar en X
+            const isH       = splitNode.dir === 'h';
+            const totalSize = isH ? splitNode.el.offsetHeight : splitNode.el.offsetWidth;
+
+            splitNode.resizerEl.classList.add('is-resizing');
+            document.body.style.cursor = isH ? 'row-resize' : 'col-resize';
+
+            let lastPos = isH ? e.clientY : e.clientX;
+            let rafId   = null;
+
+            const onMove = (ev) => {
+                const pos   = isH ? ev.clientY : ev.clientX;
+                const delta = pos - lastPos;
+                lastPos = pos;
+
+                const child0Size = isH
+                    ? splitNode.children[0].el.offsetHeight
+                    : splitNode.children[0].el.offsetWidth;
+
+                splitNode.ratio = Math.max(0.1, Math.min(0.9, (child0Size + delta) / totalSize));
+                this._applyRatio(splitNode);
+                // Throttle fit() con RAF para no llamarlo en cada pixel del drag
+                if (rafId) cancelAnimationFrame(rafId);
+                rafId = requestAnimationFrame(() => { this._fitAllInNode(splitNode); rafId = null; });
+            };
+
+            const onUp = () => {
+                splitNode.resizerEl.classList.remove('is-resizing');
+                document.body.style.cursor = '';
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+                // Fit final con doble RAF para que el layout esté asentado
+                requestAnimationFrame(() => requestAnimationFrame(() => this._fitAllInNode(splitNode)));
+            };
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    }
+
+    _applyRatio(splitNode) {
+        splitNode.children[0].el.style.flex      = String(splitNode.ratio);
+        splitNode.children[0].el.style.minWidth  = '0';
+        splitNode.children[0].el.style.minHeight = '0';
+        splitNode.children[1].el.style.flex      = String(1 - splitNode.ratio);
+        splitNode.children[1].el.style.minWidth  = '0';
+        splitNode.children[1].el.style.minHeight = '0';
+    }
+
+    // ── Fit helpers ───────────────────────────────────────────────────────────
+    _fitLeaf(leafNode) {
+        const pane = this.panes.get(leafNode.ptyId);
+        if (!pane) return;
+        try {
+            pane.fit.fit();
+            this.ipcRenderer?.send('terminal-resize', {
+                id:   leafNode.ptyId,
+                cols: pane.term.cols,
+                rows: pane.term.rows
+            });
+        } catch (_) {}
+    }
+
+    _fitAllInNode(node) {
+        this._walkLeaves(node, (leaf) => this._fitLeaf(leaf));
+    }
+
+    _fitAllVisible() {
+        if (!this.activeTabId) return;
+        const tab = this.tabs.get(this.activeTabId);
+        if (tab?.rootNode) this._fitAllInNode(tab.rootNode);
+    }
+
+    // ── Recorrido del árbol de nodos ──────────────────────────────────────────
+    _walkLeaves(node, fn) {
+        if (!node) return;
+        if (node.type === 'leaf') { fn(node); return; }
+        node.children.forEach(child => this._walkLeaves(child, fn));
+    }
+
+    _firstLeaf(node) {
+        if (!node) return null;
+        if (node.type === 'leaf') return node;
+        return this._firstLeaf(node.children[0]);
+    }
+
+    // ── Renombrar título de un pane (doble click en pane-title) ──────────────
+    _renamePaneTitle(titleEl) {
+        const oldName = titleEl.textContent;
+
+        titleEl.contentEditable = 'true';
+        titleEl.classList.add('editing');
+        titleEl.focus();
+
+        const range = document.createRange();
+        range.selectNodeContents(titleEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finish = (save) => {
+            if (titleEl.contentEditable === 'false') return;
+            titleEl.contentEditable = 'false';
+            titleEl.classList.remove('editing');
+            titleEl.textContent = (save && titleEl.textContent.trim())
+                ? titleEl.textContent.trim()
+                : oldName;
+            titleEl.onkeydown = null;
+            titleEl.onblur    = null;
+        };
+
+        titleEl.onkeydown = (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter')  { e.preventDefault(); finish(true);  }
+            if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        };
+        titleEl.onblur = () => finish(true);
+    }
+
+    // ── Renombrar pestaña (doble click) ───────────────────────────────────────
+    _renameTab(tabId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        const span    = tab.tabBtn.querySelector('span');
+        const oldName = span.textContent;
+
+        span.contentEditable = 'true';
+        span.classList.add('editing');
+
+        setTimeout(() => {
+            span.focus();
             const range = document.createRange();
-            range.selectNodeContents(nameSpan);
-            selection.removeAllRanges();
-            selection.addRange(range);
-        });
+            range.selectNodeContents(span);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }, 10);
 
-        nameSpan.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                nameSpan.blur();
-            }
-        });
+        const finish = (save) => {
+            if (span.contentEditable === 'false') return;
+            span.contentEditable = 'false';
+            span.classList.remove('editing');
+            span.textContent = (save && span.textContent.trim()) ? span.textContent.trim() : oldName;
+            span.onkeydown = null;
+            span.onblur    = null;
+        };
 
-        nameSpan.addEventListener('blur', () => {
-            nameSpan.contentEditable = 'false';
-            if (!nameSpan.textContent.trim()) {
-                nameSpan.textContent = name; // restaurar si está vacío
-            }
-        });
-
-        tabBtn.addEventListener('click', (e) => {
-            if (e.target.closest('.terminal-tab-close')) {
-                this.closeInstance(id);
-            } else if (nameSpan.contentEditable !== 'true') {
-                this.setActiveInstance(id);
-            }
-        });
-
-        this.tabsContainer.insertBefore(tabBtn, this.tabsContainer.lastElementChild);
-
-        // Body View
-        const domBody = document.createElement('div');
-        domBody.className = 'terminal-view xterm-container';
-        domBody.style.display = 'none';
-        domBody.style.height = '100%';
-        domBody.style.width = '100%';
-        domBody.style.padding = '8px';
-        domBody.style.boxSizing = 'border-box';
-
-        this.bodyContainer.appendChild(domBody);
-
-        // Xterm.js Initialization
-        const term = new Terminal({
-            cursorBlink: true,
-            fontFamily: 'JetBrains Mono, Menlo, Courier, monospace',
-            fontSize: 13,
-            lineHeight: 1.2,
-            theme: {
-                background: getComputedStyle(document.documentElement).getPropertyValue('--bg-panel').trim() || '#f9f9f9',
-                foreground: getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim() || '#333333',
-                cursor: getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim() || '#333333',
-                selectionBackground: 'rgba(0, 102, 255, 0.3)'
-            },
-            convertEol: true
-        });
-
-        const fitAddon = new FitAddon();
-        term.loadAddon(fitAddon);
-
-        term.open(domBody);
-
-        // Enviar inputs al PTY
-        term.onData(data => {
-            this.ipcRenderer.send('terminal-input', { id, input: data });
-        });
-
-        // Resize Observer para auto-ajuste al arrastrar el splitview superior o la ventana
-        const resizeObserver = new ResizeObserver(() => {
-            if (domBody.style.display !== 'none') {
-                fitAddon.fit();
-                this.ipcRenderer.send('terminal-resize', { id, cols: term.cols, rows: term.rows });
-            }
-        });
-        resizeObserver.observe(domBody);
-
-        this.instances.set(id, { id, tabBtn, domBody, term, fitAddon, resizeObserver, isClaudeActive: false });
-
-        // --- Drag & Drop support for file attachment ---
-        // Prevent Electron from navigating to dropped files (global, idempotent)
-        if (!TerminalController._dragPreventionInstalled) {
-            document.addEventListener('dragover', (e) => e.preventDefault(), true);
-            document.addEventListener('drop', (e) => e.preventDefault(), true);
-            TerminalController._dragPreventionInstalled = true;
-        }
-
-        const dropOverlay = document.createElement('div');
-        dropOverlay.className = 'terminal-drop-overlay';
-        dropOverlay.innerHTML = '<div class="terminal-drop-label">📎 Suelta archivos aquí para adjuntar</div>';
-        dropOverlay.style.cssText = 'display:none; position:absolute; inset:0; background:rgba(59,130,246,0.15); border:2px dashed rgba(59,130,246,0.6); border-radius:8px; z-index:100; align-items:center; justify-content:center;';
-        dropOverlay.querySelector('.terminal-drop-label').style.cssText = 'background:rgba(59,130,246,0.9); color:white; padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; pointer-events:none;';
-        domBody.style.position = 'relative';
-        domBody.appendChild(dropOverlay);
-
-        let dragCounter = 0;
-
-        // Use the entire panel for dragenter so we catch events even over the xterm canvas
-        const panelEl = this.panel;
-
-        panelEl.addEventListener('dragenter', (e) => {
-            e.preventDefault();
-            dragCounter++;
-            const inst = this.instances.get(id);
-            if (inst && inst.isClaudeActive && this.activeInstanceId === id) {
-                dropOverlay.style.display = 'flex';
-            }
-        });
-
-        panelEl.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            dragCounter--;
-            if (dragCounter <= 0) {
-                dragCounter = 0;
-                dropOverlay.style.display = 'none';
-            }
-        });
-
-        panelEl.addEventListener('dragover', (e) => {
-            e.preventDefault();
+        span.onkeydown = (e) => {
             e.stopPropagation();
-            e.dataTransfer.dropEffect = 'copy';
-        });
+            if (e.key === 'Enter')  { e.preventDefault(); finish(true);  }
+            if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        };
+        span.onblur = () => finish(true);
+    }
 
-        // The overlay itself accepts the drop (it covers the xterm canvas)
-        dropOverlay.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragCounter = 0;
-            dropOverlay.style.display = 'none';
+    // ── API pública (usada por app.js) ────────────────────────────────────────
+    openTerminal(options)    { return this.createTab(options); }
+    getActiveTerminalId()    { return this.tabs.get(this.activeTabId)?.activeLeafPtyId ?? null; }
+    sendInput(id, data)      { this.ipcRenderer?.send('terminal-input', { id, input: data }); }
 
-            const inst = this.instances.get(id);
-            if (!inst || !inst.isClaudeActive) return;
-
-            // Check for internal file tree drag (text/plain with relative path)
-            const internalPath = e.dataTransfer.getData('text/plain');
-            if (internalPath && !e.dataTransfer.files.length) {
-                this.insertFilePaths([internalPath]);
+    activateTerminalForFile(fileId) {
+        for (const [tabId, tab] of this.tabs) {
+            if (tab.linkedFileId === fileId) {
+                this.panel.style.display   = 'flex';
+                this.resizer.style.display = 'block';
+                this._skipNotify = true;
+                this.switchTab(tabId);
+                this._skipNotify = false;
                 return;
             }
-
-            // External file drag from Finder
-            const files = e.dataTransfer.files;
-            if (files && files.length > 0) {
-                const paths = [];
-                for (let i = 0; i < files.length; i++) {
-                    if (files[i].path) {
-                        paths.push(files[i].path);
-                    }
-                }
-                if (paths.length > 0) {
-                    this.insertFilePaths(paths);
-                }
-            }
-        });
-
-        // Also handle drop on the domBody itself as a fallback
-        domBody.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            dragCounter = 0;
-            dropOverlay.style.display = 'none';
-
-            const inst = this.instances.get(id);
-            if (!inst || !inst.isClaudeActive) return;
-
-            const internalPath = e.dataTransfer.getData('text/plain');
-            if (internalPath && !e.dataTransfer.files.length) {
-                this.insertFilePaths([internalPath]);
-                return;
-            }
-
-            const files = e.dataTransfer.files;
-            if (files && files.length > 0) {
-                const paths = [];
-                for (let i = 0; i < files.length; i++) {
-                    if (files[i].path) {
-                        paths.push(files[i].path);
-                    }
-                }
-                if (paths.length > 0) {
-                    this.insertFilePaths(paths);
-                }
-            }
-        });
-    }
-
-    setActiveInstance(id) {
-        this.activeInstanceId = id;
-
-        for (const [instId, inst] of this.instances.entries()) {
-            if (instId === id) {
-                inst.tabBtn.classList.add('active');
-                inst.domBody.style.display = 'block';
-                // Obligar fit de repintado
-                setTimeout(() => {
-                    inst.fitAddon.fit();
-                    this.ipcRenderer.send('terminal-resize', { id, cols: inst.term.cols, rows: inst.term.rows });
-                    const nameSpan = inst.tabBtn.querySelector('.terminal-tab-name');
-                    if (!nameSpan || nameSpan.contentEditable !== 'true') {
-                        inst.term.focus();
-                    }
-                }, 10);
-            } else {
-                inst.tabBtn.classList.remove('active');
-                inst.domBody.style.display = 'none';
-            }
-        }
-
-        this.updateClaudeBtnUI();
-    }
-
-    updateClaudeBtnUI() {
-        if (!this.toolbarClaudeBtn || !this.activeInstanceId) return;
-
-        const inst = this.instances.get(this.activeInstanceId);
-        if (inst) {
-            if (inst.isClaudeActive) {
-                this.toolbarClaudeBtn.innerHTML = `
-                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    Terminar Claude
-                `;
-                this.toolbarClaudeBtn.style.color = 'var(--text-color)';
-
-                if (this.toolbarSkillsBtn) {
-                    this.toolbarSkillsBtn.style.display = 'flex';
-                }
-                if (this.toolbarSetupBtn) {
-                    this.toolbarSetupBtn.style.display = 'flex';
-                }
-                if (this.toolbarSkillsBtn) {
-                    this.toolbarSkillsBtn.style.display = 'flex';
-                }
-                if (this.toolbarPrdBtn) {
-                    this.toolbarPrdBtn.style.display = 'flex';
-                }
-                if (this.toolbarAttachBtn) {
-                    this.toolbarAttachBtn.style.display = 'flex';
-                }
-            } else {
-                this.toolbarClaudeBtn.innerHTML = `
-                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    Arrancar Claude
-                `;
-                this.toolbarClaudeBtn.style.color = 'var(--text-color)';
-
-                if (this.toolbarSetupBtn) {
-                    this.toolbarSetupBtn.style.display = 'none';
-                }
-                if (this.toolbarSkillsBtn) {
-                    this.toolbarSkillsBtn.style.display = 'none';
-                }
-                if (this.toolbarPrdBtn) {
-                    this.toolbarPrdBtn.style.display = 'none';
-                }
-                if (this.toolbarAttachBtn) {
-                    this.toolbarAttachBtn.style.display = 'none';
-                }
-            }
         }
     }
 
-    closeInstance(id) {
-        if (!this.instances.has(id)) return;
-
-        if (this.ipcRenderer) {
-            this.ipcRenderer.send('terminal-kill', { id });
-        }
-
-        const inst = this.instances.get(id);
-        inst.resizeObserver.disconnect();
-        inst.term.dispose();
-        inst.tabBtn.remove();
-        inst.domBody.remove();
-        this.instances.delete(id);
-
-        if (this.activeInstanceId === id) {
-            if (this.instances.size > 0) {
-                const firstId = this.instances.keys().next().value;
-                this.setActiveInstance(firstId);
-            } else {
-                this.activeInstanceId = null;
-                this.togglePanel(false);
-            }
-        }
+    closeAll() {
+        [...this.tabs.keys()].forEach(id => this.closeTab(id));
     }
 
-    insertFilePaths(paths) {
-        if (!this.activeInstanceId || !this.ipcRenderer) return;
-        const inst = this.instances.get(this.activeInstanceId);
-        if (!inst || !inst.isClaudeActive) return;
-
-        const text = paths.join(' ');
-        this.ipcRenderer.send('terminal-input', {
-            id: this.activeInstanceId,
-            input: text
-        });
-
-        if (inst.term) {
-            inst.term.focus();
-        }
-    }
+    // Alias legacy (por compatibilidad)
+    refreshActiveTerminalSize() { this._fitAllVisible(); }
 }
 
-if (typeof window !== 'undefined') {
-    window.addEventListener('DOMContentLoaded', () => {
-        window.terminalCtrl = new TerminalController();
-    });
-}
+window.terminalCtrl = new TerminalController();

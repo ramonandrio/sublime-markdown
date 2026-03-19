@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "start:app": "env ELECTRON_RUN_AS_NODE= electron .",
-    "build:mac": "electron-builder -m",
+    "build:mac": "electron-builder -m --arm64",
+    "build:mac:intel": "electron-builder -m --x64",
     "build:win": "electron-builder --win",
     "build:test": "electron-builder -m --config electron-builder.test.config.js && xattr -cr dist/mac-arm64/CompassAI.app && codesign --sign - --force --deep --no-strict dist/mac-arm64/CompassAI.app && rm -f dist/CompassAI-test.dmg && hdiutil create -volname CompassAI -srcfolder dist/mac-arm64/CompassAI.app -ov -format UDZO dist/CompassAI-test.dmg"
   },
@@ -19,18 +20,43 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "icon": "build/icon.icns",
-      "additionalArguments": ["--no-strict"],
+      "additionalArguments": [
+        "--no-strict"
+      ],
       "strictVerify": false,
-      "notarize": false
+      "notarize": false,
+      "x64ArchFiles": "*/node_modules/node-pty/prebuilds/darwin-x64/**"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "dmg": {
+      "sign": false,
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 130,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "afterExtract": "./scripts/afterExtract.js",
     "afterPack": "./scripts/clear-xattr.js",
@@ -41,6 +67,7 @@
   "license": "ISC",
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "dompurify": "^3.3.1",
     "express": "^5.2.1",

@@ -2,6 +2,8 @@ const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const path = require('path');
 const { createServer } = require('./server.js');
 
+app.setName('CompassAI');
+
 // Map to keep track of each window and its associated server
 // Format: map.set(webContentsId, { window, server })
 const windowData = new Map();
@@ -18,8 +20,13 @@ async function createWindow(initialDir) {
         titleBarStyle: 'hiddenInset',
         webPreferences: {
             nodeIntegration: true,
-            contextIsolation: false
+            contextIsolation: false,
+            webviewTag: true
         }
+    });
+
+    mainWindow.on('page-title-updated', (e) => {
+        e.preventDefault();
     });
 
     // Register this instance
@@ -144,12 +151,14 @@ function setupMenu() {
 
 // === TERMINAL IPC HANDLERS ===
 ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
+    console.log('[BACKEND] Recibida petición terminal-start');
     try {
         const terminalManager = require('./terminal-manager');
         const senderId = event.sender.id;
         const server = getServerFromSender(senderId);
 
         const activeCwd = cwd || (server && typeof server.getRootDir === 'function' ? server.getRootDir() : null) || process.env.PMOS_ROOT_DIR || process.env.HOME;
+        console.log('[BACKEND] Iniciando PTY en CWD:', activeCwd);
 
         const id = terminalManager.startTerminal(
             activeCwd,
@@ -169,9 +178,11 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
                 }
             }
         );
-        return { success: true, id };
+        console.log('[BACKEND] Terminal iniciada con éxito. ID:', id);
+        return { ok: true, id };
     } catch (err) {
-        return { success: false, error: err.message };
+        console.error('[BACKEND] ERROR al iniciar terminal:', err);
+        return { ok: false, error: err.message };
     }
 });
 
@@ -271,6 +282,82 @@ ipcMain.handle('create-compassai-workspace', async (event, workspaceName) => {
     } catch (err) {
         return { success: false, error: err.message };
     }
+});
+
+ipcMain.on('set-window-title', (event, data) => {
+    const senderId = event.sender.id;
+    const targetWindow = windowData.get(senderId)?.window;
+    if (targetWindow && !targetWindow.isDestroyed()) {
+        const title = typeof data === 'string' ? data : data.title;
+        const representedPath = typeof data === 'object' ? data.path : null;
+        
+        targetWindow.setTitle(title);
+        if (representedPath) {
+            targetWindow.setRepresentedFilename(representedPath);
+        }
+    }
+});
+
+// ---- Coda API proxy (avoids CORS from renderer) ----
+ipcMain.handle('coda-api-request', async (event, { path: apiPath, apiKey }) => {
+    const https = require('https');
+    return new Promise((resolve) => {
+        const options = {
+            hostname: 'coda.io',
+            path: `/apis/v1${apiPath}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Accept': 'application/json'
+            }
+        };
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
+                } catch {
+                    resolve({ ok: false, status: res.statusCode, data: null });
+                }
+            });
+        });
+        req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
+        req.end();
+    });
+});
+
+// ---- Notion API proxy (avoids CORS from renderer) ----
+ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GET', body = null, apiKey }) => {
+    const https = require('https');
+    return new Promise((resolve) => {
+        const options = {
+            hostname: 'api.notion.com',
+            path: `/v1${apiPath}`,
+            method: method,
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Notion-Version': '2022-06-28',
+                'Content-Type': 'application/json'
+            }
+        };
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
+                } catch {
+                    resolve({ ok: false, status: res.statusCode, data: null });
+                }
+            });
+        });
+        req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
+        if (body) {
+            req.write(JSON.stringify(body));
+        }
+        req.end();
+    });
 });
 
 app.whenReady().then(async () => {
