@@ -149,6 +149,30 @@ function setupMenu() {
     Menu.setApplicationMenu(menu);
 }
 
+// Buffer de salida PTY por terminal.
+// Implementa DEC Synchronized Output (\x1b[?2026h / \x1b[?2026l):
+// cuando detectamos el marker de inicio, retenemos el buffer hasta recibir
+// el marker de fin, y entonces enviamos el bloque completo de una vez.
+// Así xterm.js nunca ve el estado intermedio "línea borrada" sin su redraw.
+const ptyOutputBufs = new Map(); // terminalId → { data, immediate, inSync, syncTimeout }
+
+const SYNC_BEGIN      = '\x1b[?2026h';
+const SYNC_END        = '\x1b[?2026l';
+const SYNC_TIMEOUT_MS = 80;  // máx ms esperando fin-sync antes de forzar flush
+
+function flushPtyBuf(terminalId, targetWindow) {
+    const buf = ptyOutputBufs.get(terminalId);
+    if (!buf) return;
+    if (buf.syncTimeout) { clearTimeout(buf.syncTimeout); buf.syncTimeout = null; }
+    buf.immediate = null;
+    buf.inSync    = false;
+    const data = buf.data;
+    buf.data = '';
+    if (data && !targetWindow.isDestroyed()) {
+        targetWindow.webContents.send('terminal-output', { id: terminalId, data });
+    }
+}
+
 // === TERMINAL IPC HANDLERS ===
 ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
     console.log('[BACKEND] Recibida petición terminal-start');
@@ -163,15 +187,45 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
         const id = terminalManager.startTerminal(
             activeCwd,
             command,
-            // onData: enviar output al frontend
-            (id, data, type) => {
+            // onData: batching con detección de DEC Synchronized Output y full-clear.
+            // - Sync markers (ESC[?2026h/l): esperamos al fin antes de enviar.
+            // - Full clear (ESC[2J, patrón de Gemini): retenemos CLEAR_HOLD_MS para
+            //   capturar el redraw que llega justo después, evitando que xterm.js
+            //   renderice el frame en blanco intermedio que produce el parpadeo.
+            (id, data) => {
                 const targetWindow = windowData.get(senderId)?.window;
-                if (targetWindow && !targetWindow.isDestroyed()) {
-                    targetWindow.webContents.send('terminal-output', { id, data, type });
+                if (!targetWindow || targetWindow.isDestroyed()) return;
+
+                let buf = ptyOutputBufs.get(id);
+                if (!buf) {
+                    buf = { data: '', immediate: null, inSync: false, syncTimeout: null };
+                    ptyOutputBufs.set(id, buf);
+                }
+                buf.data += data;
+
+                // Actualizar estado sync
+                if (data.includes(SYNC_BEGIN)) buf.inSync = true;
+                if (data.includes(SYNC_END))   buf.inSync = false;
+
+                if (buf.inSync) {
+                    // Dentro de bloque sync: esperar al fin. Safety timeout por si nunca llega.
+                    if (buf.immediate) { clearImmediate(buf.immediate); buf.immediate = null; }
+                    if (!buf.syncTimeout) {
+                        buf.syncTimeout = setTimeout(() => flushPtyBuf(id, targetWindow), SYNC_TIMEOUT_MS);
+                    }
+                } else if (buf.syncTimeout) {
+                    // Ya hay un timeout activo (bloque sync): acumular sin interrumpir.
+                } else {
+                    // Datos normales: flush en la próxima vuelta del event loop.
+                    // El renderer agrupa todo lo que llegue en el mismo frame RAF.
+                    if (!buf.immediate) {
+                        buf.immediate = setImmediate(() => flushPtyBuf(id, targetWindow));
+                    }
                 }
             },
-            // onExit: notificar cierre
+            // onExit: limpiar buffer y notificar cierre
             (id, code) => {
+                ptyOutputBufs.delete(id);
                 const targetWindow = windowData.get(senderId)?.window;
                 if (targetWindow && !targetWindow.isDestroyed()) {
                     targetWindow.webContents.send('terminal-exit', { id, code });

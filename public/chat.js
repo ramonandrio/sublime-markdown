@@ -9,7 +9,7 @@
  *   Ctrl+Shift+W  →  cerrar panel activo
  */
 
-let Terminal, FitAddon;
+let Terminal, FitAddon, WebglAddon;
 
 function loadTerminalLibs() {
     if (Terminal) return true;
@@ -18,6 +18,7 @@ function loadTerminalLibs() {
             const xterm = window.require('@xterm/xterm');
             Terminal = xterm.Terminal || xterm;
             FitAddon = window.require('@xterm/addon-fit').FitAddon;
+            try { WebglAddon = window.require('@xterm/addon-webgl').WebglAddon; } catch (_) {}
             return !!Terminal;
         }
     } catch (e) { console.error('Error xterm libs:', e); }
@@ -89,7 +90,18 @@ class TerminalController {
 
         this.ipcRenderer.on('terminal-output', (event, { id, data }) => {
             const pane = this.panes.get(id);
-            if (pane) pane.term.write(data);
+            if (!pane) return;
+            pane._writeBuf = (pane._writeBuf || '') + data;
+            // Debounce: reiniciamos el timer con cada chunk nuevo para acumular
+            // todo un ciclo de actualización de Gemini (cursor move + clear + redraw + status bar)
+            // antes de escribir. El wrap con ESC[?2026h/l hace el render atómico en xterm.js v6.
+            if (pane._writeTimer) clearTimeout(pane._writeTimer);
+            pane._writeTimer = setTimeout(() => {
+                const buf = pane._writeBuf;
+                pane._writeBuf = '';
+                pane._writeTimer = null;
+                pane.term.write('\x1b[?2026h' + buf + '\x1b[?2026l');
+            }, 16);
         });
 
         this.ipcRenderer.on('terminal-exit', (event, { id }) => {
@@ -272,19 +284,31 @@ class TerminalController {
 
         // Motor xterm.js
         const term = new Terminal({
-            cursorBlink: true,
+            cursorBlink: false, // el blink interfiere con redraws rápidos de TUIs (Gemini, etc.)
             fontFamily:  'JetBrains Mono, Menlo, Monaco, Courier New, monospace',
             fontSize:    13,
             lineHeight:  1.2,
             theme:       TERM_THEME,
-            convertEol:  true
+            convertEol:  true,
+            overviewRulerWidth: 0, // deshabilita el overview ruler (menos trabajo de render)
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
         term.open(termEl);
+
+        // WebGL renderer: reduce el flickering del status bar de TUIs como Gemini
+        if (WebglAddon) {
+            try {
+                const webgl = new WebglAddon();
+                webgl.onContextLoss(() => webgl.dispose()); // fallback si pierde contexto GPU
+                term.loadAddon(webgl);
+            } catch (_) { /* fallback al canvas renderer si WebGL no está disponible */ }
+        }
+
         term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
 
-        this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null });
+        this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
+            _writeBuf: '', _writeTimer: null });
 
         // Activar pane al hacer click en él
         el.addEventListener('mousedown', () => this._setActiveLeaf(tabId, ptyId));

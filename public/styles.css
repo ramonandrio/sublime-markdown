@@ -1857,6 +1857,15 @@ body {
 
 .pane-terminal .xterm-screen {
     background-color: #FAFAFA !important;
+    /* Fuerza un layer GPU independiente: los redraws internos del canvas
+       no se propagan al compositor como frames intermedios visibles,
+       eliminando el parpadeo durante actualizaciones rápidas de TUIs. */
+    will-change: transform;
+}
+
+.pane-terminal .xterm-screen canvas {
+    display: block; /* evita el gap de inline element */
+    will-change: transform;
 }
 
 /* Divisores entre panes */
