@@ -1,8 +1,9 @@
 {
   "name": "compassai",
   "version": "1.0.0",
-  "description": "",
+  "description": "CompassAI — entorno de trabajo con terminal y visor de documentos",
   "main": "main.js",
+  "author": "Ramon Andrio",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
@@ -15,6 +16,26 @@
   "build": {
     "appId": "com.ramonandrio.compassai",
     "productName": "CompassAI",
+    "files": [
+      "main.js",
+      "server.js",
+      "terminal-manager.js",
+      "public/**/*",
+      "templates/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*",
+      "!**/*.map",
+      "!.env",
+      "!.gitignore",
+      "!**/*.log",
+      "!test-pty.js",
+      "!mask_logo*.py",
+      "!vercel.json",
+      "!README.md",
+      "!scripts/**/*",
+      "!dist/**/*",
+      "!electron-builder*.js"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
