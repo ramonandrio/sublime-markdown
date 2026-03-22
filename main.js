@@ -44,6 +44,16 @@ async function createWindow(initialDir) {
         windowData.delete(webContentsId);
     });
 
+    // Bloquear DevTools en producción también por atajo de teclado
+    if (app.isPackaged) {
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            const devToolsShortcut =
+                (input.key === 'F12') ||
+                (input.key === 'I' && input.alt && input.meta); // Cmd+Option+I
+            if (devToolsShortcut) event.preventDefault();
+        });
+    }
+
     mainWindow.loadURL(`http://localhost:${port}`);
     return mainWindow;
 }
@@ -120,7 +130,7 @@ function setupMenu() {
             submenu: [
                 { role: 'reload' },
                 { role: 'forceReload' },
-                { role: 'toggleDevTools' },
+                ...(!app.isPackaged ? [{ role: 'toggleDevTools' }] : []),
                 { type: 'separator' },
                 { role: 'resetZoom' },
                 { role: 'zoomIn' },
