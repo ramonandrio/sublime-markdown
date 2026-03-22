@@ -342,6 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
 
     async function initApp() {
+        await GitHubAPI.init(); // carga el token cifrado desde el keychain del sistema
         const state = await WorkspaceDB.load();
         if (state && (state.currentGitHubRepo || state.localFolderHandle || state.currentNodeServer)) {
             // Restore state

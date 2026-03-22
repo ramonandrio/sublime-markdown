@@ -1,5 +1,6 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { createServer } = require('./server.js');
 
 app.setName('CompassAI');
@@ -148,6 +149,45 @@ function setupMenu() {
     const menu = Menu.buildFromTemplate(template);
     Menu.setApplicationMenu(menu);
 }
+
+// === KEYSTORE (safeStorage) ===
+// Cifra valores sensibles con el keychain del sistema operativo.
+// Los datos cifrados se persisten en userData/keystore.json como base64.
+const KEYSTORE_PATH = path.join(app.getPath('userData'), 'keystore.json');
+
+function _readKeystore() {
+    try {
+        if (fs.existsSync(KEYSTORE_PATH)) return JSON.parse(fs.readFileSync(KEYSTORE_PATH, 'utf8'));
+    } catch {}
+    return {};
+}
+
+function _writeKeystore(store) {
+    fs.writeFileSync(KEYSTORE_PATH, JSON.stringify(store), 'utf8');
+}
+
+ipcMain.handle('keystore-get', (event, key) => {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const store = _readKeystore();
+    if (!store[key]) return null;
+    try { return safeStorage.decryptString(Buffer.from(store[key], 'base64')); }
+    catch { return null; }
+});
+
+ipcMain.handle('keystore-set', (event, key, value) => {
+    if (!safeStorage.isEncryptionAvailable()) return false;
+    const store = _readKeystore();
+    store[key] = safeStorage.encryptString(value).toString('base64');
+    _writeKeystore(store);
+    return true;
+});
+
+ipcMain.handle('keystore-remove', (event, key) => {
+    const store = _readKeystore();
+    delete store[key];
+    _writeKeystore(store);
+    return true;
+});
 
 // Buffer de salida PTY por terminal.
 // Implementa DEC Synchronized Output (\x1b[?2026h / \x1b[?2026l):
@@ -301,7 +341,17 @@ ipcMain.handle('create-compassai-workspace', async (event, workspaceName) => {
     }
 
     const parentDir = result.filePaths[0];
+
+    // Validar que el nombre no contiene separadores de ruta ni caracteres nulos
+    if (!workspaceName || /[/\\\0]/.test(workspaceName) || workspaceName === '.' || workspaceName === '..') {
+        return { success: false, error: 'Nombre de workspace inválido' };
+    }
     const targetDir = path.join(parentDir, workspaceName);
+    // Verificar que el resultado final sigue dentro del directorio elegido
+    if (!targetDir.startsWith(parentDir + path.sep)) {
+        return { success: false, error: 'Nombre de workspace inválido' };
+    }
+
     const templateDir = path.join(__dirname, 'templates', 'compassai');
 
     const fs = require('fs');
@@ -353,6 +403,8 @@ ipcMain.on('set-window-title', (event, data) => {
 });
 
 // ---- Coda API proxy (avoids CORS from renderer) ----
+const HTTPS_TIMEOUT_MS = 10000; // 10 s máximo para cualquier request a APIs externas
+
 ipcMain.handle('coda-api-request', async (event, { path: apiPath, apiKey }) => {
     const https = require('https');
     return new Promise((resolve) => {
@@ -375,6 +427,10 @@ ipcMain.handle('coda-api-request', async (event, { path: apiPath, apiKey }) => {
                     resolve({ ok: false, status: res.statusCode, data: null });
                 }
             });
+        });
+        req.setTimeout(HTTPS_TIMEOUT_MS, () => {
+            req.destroy();
+            resolve({ ok: false, error: 'timeout', data: null });
         });
         req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
         req.end();
@@ -405,6 +461,10 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
                     resolve({ ok: false, status: res.statusCode, data: null });
                 }
             });
+        });
+        req.setTimeout(HTTPS_TIMEOUT_MS, () => {
+            req.destroy();
+            resolve({ ok: false, error: 'timeout', data: null });
         });
         req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
         if (body) {

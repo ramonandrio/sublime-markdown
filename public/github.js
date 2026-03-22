@@ -2,22 +2,46 @@
 // Simplificado: el usuario pega su token y listo
 
 const GitHubAPI = (() => {
-    const TOKEN_KEY = 'md_viewer_github_token';
+    const TOKEN_KEY = 'github_token';
+    let _token = null; // caché en memoria; cargado una vez en init()
+
+    const _ipc = (typeof window.require !== 'undefined')
+        ? window.require('electron').ipcRenderer : null;
+
+    // Llama a init() una vez al arrancar la app para cargar el token cifrado.
+    async function init() {
+        if (_ipc) {
+            _token = await _ipc.invoke('keystore-get', TOKEN_KEY);
+        } else {
+            // Fallback para ejecución en navegador sin Electron
+            _token = localStorage.getItem('md_viewer_github_token');
+        }
+    }
 
     function getToken() {
-        return localStorage.getItem(TOKEN_KEY);
+        return _token;
     }
 
-    function setToken(token) {
-        localStorage.setItem(TOKEN_KEY, token);
+    async function setToken(token) {
+        _token = token;
+        if (_ipc) {
+            await _ipc.invoke('keystore-set', TOKEN_KEY, token);
+        } else {
+            localStorage.setItem('md_viewer_github_token', token);
+        }
     }
 
-    function clearToken() {
-        localStorage.removeItem(TOKEN_KEY);
+    async function clearToken() {
+        _token = null;
+        if (_ipc) {
+            await _ipc.invoke('keystore-remove', TOKEN_KEY);
+        } else {
+            localStorage.removeItem('md_viewer_github_token');
+        }
     }
 
     function isAuthenticated() {
-        return !!getToken();
+        return !!_token;
     }
 
     // Llamada genérica a la API de GitHub
@@ -157,7 +181,7 @@ const GitHubAPI = (() => {
     }
 
     return {
-        getToken, setToken, clearToken, isAuthenticated,
+        init, getToken, setToken, clearToken, isAuthenticated,
         getUser, listRepos, getRepoTree, getFileContent, saveFile, searchCode
     };
 })();

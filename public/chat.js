@@ -397,8 +397,11 @@ class TerminalController {
         if (tab) this._setActiveLeaf(pane.tabId, ptyId);
         pane.term.focus();
 
-        // Escapa y concatena las rutas con espacios (sin \r: el usuario decide cuándo ejecutar)
-        const text = paths.map(p => `"${p}"`).join(' ');
+        // Escapa las rutas para la shell: sustituye cada carácter problemático
+        // dentro de comillas simples (POSIX). Las comillas simples dentro de la
+        // propia ruta se cierran, escapan con \' y se vuelven a abrir.
+        const shellEscape = p => "'" + p.replace(/'/g, "'\\''") + "'";
+        const text = paths.map(shellEscape).join(' ');
         this.ipcRenderer?.send('terminal-input', { id: ptyId, input: text });
     }
 

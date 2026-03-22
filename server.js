@@ -21,7 +21,8 @@ function createServer(initialDir) {
     // Servir archivos estáticos del frontend
     app.use(express.static(path.join(__dirname, 'public')));
     app.use('/node_modules', express.static(path.join(__dirname, 'node_modules')));
-    app.use(express.json());
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+    app.use(express.json({ limit: '10mb' }));
 
     // Función recursiva para obtener el árbol de directorios
     function getDirectoryTree(dirPath, basePath = '') {
@@ -82,6 +83,10 @@ function createServer(initialDir) {
 
         try {
             if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
+                const stat = fs.statSync(safePath);
+                if (stat.size > MAX_FILE_SIZE) {
+                    return res.status(413).json({ error: 'File too large (max 10 MB)' });
+                }
                 const content = fs.readFileSync(safePath, 'utf8');
                 res.setHeader('Content-Type', 'text/plain; charset=utf-8');
                 res.send(content);
@@ -89,7 +94,7 @@ function createServer(initialDir) {
                 res.status(404).json({ error: 'File not found' });
             }
         } catch (err) {
-            res.status(500).json({ error: 'Error reading file', details: err.message });
+            res.status(500).json({ error: 'Error reading file' });
         }
     });
 
@@ -100,11 +105,14 @@ function createServer(initialDir) {
         const safePath = path.resolve(ROOT_DIR, filePath);
         if (!safePath.startsWith(ROOT_DIR)) return res.status(403).json({ error: 'Access denied' });
 
+        if (Buffer.byteLength(content, 'utf8') > MAX_FILE_SIZE) {
+            return res.status(413).json({ error: 'Content too large (max 10 MB)' });
+        }
         try {
             fs.writeFileSync(safePath, content, 'utf8');
             res.json({ success: true, message: 'File saved successfully' });
         } catch (err) {
-            res.status(500).json({ error: 'Error saving file', details: err.message });
+            res.status(500).json({ error: 'Error saving file' });
         }
     });
 
