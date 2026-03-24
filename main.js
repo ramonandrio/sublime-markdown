@@ -5,6 +5,10 @@ const { createServer } = require('./server.js');
 
 app.setName('CompassAI');
 
+// Logs solo en desarrollo; en producción se silencian
+const log = (...args) => { if (!app.isPackaged) console.log(...args); };
+const warn = (...args) => { if (!app.isPackaged) console.warn(...args); };
+
 // Map to keep track of each window and its associated server
 // Format: map.set(webContentsId, { window, server })
 const windowData = new Map();
@@ -62,7 +66,7 @@ async function createWindow(initialDir) {
 function getServerFromSender(webContentsId) {
     const data = windowData.get(webContentsId);
     if (!data) {
-        console.warn(`[main] getServerFromSender: no window registered for webContents id=${webContentsId}`);
+        warn(`[main] getServerFromSender: no window registered for webContents id=${webContentsId}`);
         return null;
     }
     return data.server;
@@ -225,14 +229,14 @@ function flushPtyBuf(terminalId, targetWindow) {
 
 // === TERMINAL IPC HANDLERS ===
 ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
-    console.log('[BACKEND] Recibida petición terminal-start');
+    log('[BACKEND] Recibida petición terminal-start');
     try {
         const terminalManager = require('./terminal-manager');
         const senderId = event.sender.id;
         const server = getServerFromSender(senderId);
 
         const activeCwd = cwd || (server && typeof server.getRootDir === 'function' ? server.getRootDir() : null) || process.env.PMOS_ROOT_DIR || process.env.HOME;
-        console.log('[BACKEND] Iniciando PTY en CWD:', activeCwd);
+        log('[BACKEND] Iniciando PTY en CWD:', activeCwd);
 
         const id = terminalManager.startTerminal(
             activeCwd,
@@ -282,7 +286,7 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
                 }
             }
         );
-        console.log('[BACKEND] Terminal iniciada con éxito. ID:', id);
+        log('[BACKEND] Terminal iniciada con éxito. ID:', id);
         return { ok: true, id };
     } catch (err) {
         console.error('[BACKEND] ERROR al iniciar terminal:', err);
