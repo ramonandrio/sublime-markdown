@@ -494,13 +494,40 @@ app.whenReady().then(async () => {
     process.env.PMOS_ROOT_DIR = path.resolve(__dirname, '..');
 
     // Create initial window
-    await createWindow();
+    try {
+        await createWindow();
+    } catch (err) {
+        showErrorDialog('No se pudo iniciar CompassAI', err.message || String(err));
+        app.quit();
+        return;
+    }
 
     app.on('activate', async () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-            await createWindow();
+            try { await createWindow(); } catch (_) {}
         }
     });
+});
+
+// === ERROR HANDLING GLOBAL ===
+// Muestra un diálogo nativo al usuario en caso de errores no capturados.
+// En desarrollo también se imprime en consola para facilitar el debug.
+
+function showErrorDialog(title, detail) {
+    if (app.isReady()) {
+        dialog.showErrorBox(title, detail);
+    }
+}
+
+process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err);
+    showErrorDialog('Error inesperado', err.message || String(err));
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    showErrorDialog('Error inesperado', msg);
 });
 
 app.on('window-all-closed', () => {
