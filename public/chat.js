@@ -126,6 +126,16 @@ class TerminalController {
         });
     }
 
+    // ── Bloquear/desbloquear iframes y webviews durante el drag ─────────────
+    // Sin esto, cuando el cursor entra en un iframe (Coda, Notion, HTML preview)
+    // durante un resize, el iframe captura los eventos del ratón y el drag se pierde.
+    _blockEmbeds(block) {
+        const style = block ? 'none' : '';
+        document.querySelectorAll('iframe, webview').forEach(el => {
+            el.style.pointerEvents = style;
+        });
+    }
+
     // ── Resizer del panel principal (entre content y terminal) ────────────────
     _initPanelResizer() {
         let isResizing = false;
@@ -134,6 +144,7 @@ class TerminalController {
             isResizing = true;
             document.body.style.cursor = 'row-resize';
             this.resizer.classList.add('is-resizing');
+            this._blockEmbeds(true);
             e.preventDefault();
         });
 
@@ -151,6 +162,7 @@ class TerminalController {
             isResizing = false;
             document.body.style.cursor = 'default';
             this.resizer.classList.remove('is-resizing');
+            this._blockEmbeds(false);
             this._fitAllVisible();
         });
     }
@@ -618,6 +630,7 @@ class TerminalController {
 
             splitNode.resizerEl.classList.add('is-resizing');
             document.body.style.cursor = isH ? 'row-resize' : 'col-resize';
+            this._blockEmbeds(true);
 
             let lastPos = isH ? e.clientY : e.clientX;
             let rafId   = null;
@@ -641,6 +654,7 @@ class TerminalController {
             const onUp = () => {
                 splitNode.resizerEl.classList.remove('is-resizing');
                 document.body.style.cursor = '';
+                this._blockEmbeds(false);
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
                 if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
