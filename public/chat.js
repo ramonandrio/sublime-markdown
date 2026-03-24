@@ -153,7 +153,7 @@ class TerminalController {
             const newH = window.innerHeight - e.clientY;
             if (newH > 100 && newH < window.innerHeight * 0.8) {
                 this.panel.style.height = `${newH}px`;
-                this._fitAllVisible();
+                this._fitAllVisible(false);
             }
         });
 
@@ -646,9 +646,9 @@ class TerminalController {
 
                 splitNode.ratio = Math.max(0.1, Math.min(0.9, (child0Size + delta) / totalSize));
                 this._applyRatio(splitNode);
-                // Throttle fit() con RAF para no llamarlo en cada pixel del drag
+                // Throttle fit() con RAF; solo visual (sin notificar al PTY) durante el drag
                 if (rafId) cancelAnimationFrame(rafId);
-                rafId = requestAnimationFrame(() => { this._fitAllInNode(splitNode); rafId = null; });
+                rafId = requestAnimationFrame(() => { this._fitAllInNode(splitNode, false); rafId = null; });
             };
 
             const onUp = () => {
@@ -677,27 +677,32 @@ class TerminalController {
     }
 
     // ── Fit helpers ───────────────────────────────────────────────────────────
-    _fitLeaf(leafNode) {
+    // notifyPty: si es false, solo redimensiona xterm.js visualmente sin enviar
+    // el resize al PTY. Esto evita que la shell redibuje el prompt en cada pixel
+    // del drag — el resize real se envía una sola vez al soltar el ratón.
+    _fitLeaf(leafNode, notifyPty = true) {
         const pane = this.panes.get(leafNode.ptyId);
         if (!pane) return;
         try {
             pane.fit.fit();
-            this.ipcRenderer?.send('terminal-resize', {
-                id:   leafNode.ptyId,
-                cols: pane.term.cols,
-                rows: pane.term.rows
-            });
+            if (notifyPty) {
+                this.ipcRenderer?.send('terminal-resize', {
+                    id:   leafNode.ptyId,
+                    cols: pane.term.cols,
+                    rows: pane.term.rows
+                });
+            }
         } catch (_) {}
     }
 
-    _fitAllInNode(node) {
-        this._walkLeaves(node, (leaf) => this._fitLeaf(leaf));
+    _fitAllInNode(node, notifyPty = true) {
+        this._walkLeaves(node, (leaf) => this._fitLeaf(leaf, notifyPty));
     }
 
-    _fitAllVisible() {
+    _fitAllVisible(notifyPty = true) {
         if (!this.activeTabId) return;
         const tab = this.tabs.get(this.activeTabId);
-        if (tab?.rootNode) this._fitAllInNode(tab.rootNode);
+        if (tab?.rootNode) this._fitAllInNode(tab.rootNode, notifyPty);
     }
 
     // ── Recorrido del árbol de nodos ──────────────────────────────────────────
