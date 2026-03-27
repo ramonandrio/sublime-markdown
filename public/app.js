@@ -19,20 +19,41 @@ document.addEventListener('DOMContentLoaded', () => {
     const tocList = document.getElementById('tocList');
     const previewPanel = document.getElementById('previewPanel');
     const lineNumbers  = document.getElementById('lineNumbers');
+    const editorLineMirror = document.getElementById('editorLineMirror');
 
-    // --- LINE NUMBERS ---
+    // --- LINE NUMBERS (scroll-anchored via shared container + mirror height) ---
     function updateLineNumbers() {
         if (!lineNumbers) return;
         const lines = markdownEditor.value.split('\n');
-        lineNumbers.innerHTML = lines.map((_, i) => `<span>${i + 1}</span>`).join('');
-        // Sync scroll position
-        lineNumbers.scrollTop = markdownEditor.scrollTop;
+
+        // Resize textarea to fit content (parent container scrolls)
+        markdownEditor.style.height = 'auto';
+        markdownEditor.style.height = markdownEditor.scrollHeight + 'px';
+
+        // Measure each line's rendered height using the mirror div
+        const mirror = editorLineMirror;
+        const editorWidth = markdownEditor.clientWidth
+            - parseFloat(getComputedStyle(markdownEditor).paddingLeft)
+            - parseFloat(getComputedStyle(markdownEditor).paddingRight);
+        mirror.style.width = editorWidth + 'px';
+
+        const lineHeight = parseFloat(getComputedStyle(markdownEditor).lineHeight);
+        const spans = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            // Use a non-breaking space for empty lines so the mirror still has height
+            mirror.textContent = lines[i] || '\u00a0';
+            const h = mirror.offsetHeight;
+            // Round to nearest multiple of lineHeight to keep alignment clean
+            const adjustedH = Math.max(lineHeight, Math.ceil(h / lineHeight) * lineHeight);
+            spans.push(`<span style="height:${adjustedH}px;line-height:${adjustedH}px">${i + 1}</span>`);
+        }
+
+        lineNumbers.innerHTML = spans.join('');
     }
 
-    markdownEditor.addEventListener('input',  updateLineNumbers);
-    markdownEditor.addEventListener('scroll', () => {
-        if (lineNumbers) lineNumbers.scrollTop = markdownEditor.scrollTop;
-    });
+    markdownEditor.addEventListener('input', updateLineNumbers);
+    // No scroll sync needed — parent .editor-with-lines scrolls both together
 
     // Welcome screen
     const welcomeLocalBtn = document.getElementById('welcomeLocalBtn');
@@ -64,6 +85,26 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentNodeServer = false;
     let allRepos = [];
     let expandedFolders = new Set();
+    let splitGroup = null; // { left: tabId, right: tabId } o null si no hay split activo
+    let splitFlexPct = 50; // porcentaje del panel izquierdo (para recordar el resize)
+
+    // Bloquear webviews/iframes durante drag resize
+    function _blockWebviews() {
+        document.querySelectorAll('webview, iframe').forEach(el => { el.style.pointerEvents = 'none'; });
+    }
+    function _unblockWebviews() {
+        document.querySelectorAll('webview, iframe').forEach(el => { el.style.pointerEvents = ''; });
+    }
+
+    // Context menu compartido (sidebar + tabs)
+    let activeContextMenu = null;
+    function removeContextMenu() {
+        if (activeContextMenu) {
+            activeContextMenu.remove();
+            activeContextMenu = null;
+        }
+    }
+    document.addEventListener('click', removeContextMenu);
 
     // Search State
     let localSearchIndex = new Map(); // path -> { path, name, rawContent }
@@ -127,10 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (currentLocalFolderHandle) {
             projectName = currentLocalFolderHandle.name;
-            sourceIndicator.innerHTML = `
-                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                <span>Local: ${currentLocalFolderHandle.name}</span>
-            `;
+            sourceIndicator.textContent = 'LOCAL';
             sourceIndicator.title = `Carpeta Local: ${currentLocalFolderHandle.name}`;
         } else if (currentNodeServer) {
             let folderName = 'Servidor Local';
@@ -144,20 +182,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             projectName = folderName;
-            sourceIndicator.innerHTML = `
-                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"></path></svg>
-                <span>${folderName}</span>
-            `;
+            sourceIndicator.textContent = 'LOCAL';
             sourceIndicator.title = `Servidor Node Local: ${folderName}`;
         } else if (currentGitHubRepo) {
             projectName = currentGitHubRepo.repo;
-            sourceIndicator.innerHTML = `
-                <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.564 9.564 0 0112 6.844c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.379.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z"></path></svg>
-                <span>GH: ${currentGitHubRepo.repo}</span>
-            `;
+            sourceIndicator.textContent = 'GITHUB';
             sourceIndicator.title = `GitHub: ${currentGitHubRepo.fullName}`;
         } else {
-            sourceIndicator.innerHTML = '';
+            sourceIndicator.textContent = '';
             sourceIndicator.title = '';
         }
 
@@ -495,6 +527,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof startNodeIndexing === 'function') startNodeIndexing(treeData);
 
             fileTreeContainer.innerHTML = '';
+            fileTreeContainer._treeData = treeData;
             const rootEl = renderTreeItem(treeData, true);
             fileTreeContainer.appendChild(rootEl);
         } catch (err) {
@@ -931,69 +964,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
     sidebarOverlay.addEventListener('click', closeMobileSidebar);
 
+    // Soft refresh: Cmd+R refresca árbol y documento activo, sin tocar terminales
+    if (typeof window.require !== 'undefined') {
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.on('soft-refresh', async () => {
+            // 1. Refrescar árbol de archivos
+            if (currentNodeServer) {
+                await renderNodeFolder();
+            } else if (currentGitHubRepo) {
+                fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
+                try {
+                    const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
+                    if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
+                    fileTreeContainer.innerHTML = '';
+                    fileTreeContainer.appendChild(renderTreeItem(treeData, true));
+                } catch (err) {
+                    fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
+                }
+            } else if (currentLocalFolderHandle) {
+                const treeData = await getTreeFromHandle(currentLocalFolderHandle, '');
+                fileTreeContainer.innerHTML = '';
+                fileTreeContainer.appendChild(renderTreeItem(treeData, true));
+            }
+
+            // 2. Recargar contenido del documento activo (si hay uno abierto)
+            const activeTab = openTabs.find(t => t.id === activeTabId);
+            if (activeTab) {
+                await loadFileContent(activeTab);
+                setActiveTab(activeTabId);
+            }
+        });
+    }
+
     // Toggle TOC
     toggleTocBtn.addEventListener('click', () => {
         isTocOpen = !isTocOpen;
         updateTocVisibility();
     });
 
-    // Toggle Notes Panel
-    const notesPanel = document.getElementById('notesPanel');
-    const toggleNotesBtn = document.getElementById('toggleNotesBtn');
-    const notesTextarea = document.getElementById('notesTextarea');
-    let isNotesOpen = false;
-
-    toggleNotesBtn.addEventListener('click', () => {
-        isNotesOpen = !isNotesOpen;
-        notesPanel.style.display = isNotesOpen ? 'flex' : 'none';
-        if (isNotesOpen && activeTabId) loadNoteForFile(activeTabId);
-    });
-
-    async function loadNoteForFile(fileId) {
-        try {
-            const note = await WorkspaceDB.loadNote(fileId);
-            notesTextarea.value = note ? note.text : '';
-            updateNotesIndicator(fileId);
-        } catch (e) {
-            notesTextarea.value = '';
-        }
-    }
-
-    async function updateNotesIndicator(fileId) {
-        try {
-            const note = await WorkspaceDB.loadNote(fileId);
-            if (note && note.text.trim()) {
-                toggleNotesBtn.classList.add('notes-has-content');
-            } else {
-                toggleNotesBtn.classList.remove('notes-has-content');
-            }
-        } catch (e) {
-            toggleNotesBtn.classList.remove('notes-has-content');
-        }
-    }
-
-    let noteSaveTimeout = null;
-
-    notesTextarea.addEventListener('input', () => {
-        if (!activeTabId) return;
-
-        // Show saving status in the hint area
-        const hint = document.querySelector('.notes-hint');
-        if (hint) hint.innerHTML = '✍️ Guardando...';
-
-        clearTimeout(noteSaveTimeout);
-        noteSaveTimeout = setTimeout(async () => {
-            const text = notesTextarea.value.trim();
-            if (text) {
-                await WorkspaceDB.saveNote(activeTabId, text);
-                if (hint) hint.innerHTML = '🔒 Guardado automático en tu navegador';
-            } else {
-                await WorkspaceDB.deleteNote(activeTabId);
-                if (hint) hint.innerHTML = '🔒 Guardado automático en tu navegador';
-            }
-            updateNotesIndicator(activeTabId);
-        }, 500); // 500ms debounce
-    });
 
     // Guardar
     saveFileBtn.addEventListener('click', () => saveActiveFile());
@@ -1067,6 +1075,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const rawHtml = marked.parse(activeTab.rawContent);
         activeTab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
         markdownContent.innerHTML = activeTab.content;
+
+        // Actualizar split view si este tab es el partner visible
+        if (splitGroup && splitMarkdownContent) {
+            const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+            if (activeTab.id === partnerId) {
+                splitMarkdownContent.innerHTML = activeTab.content;
+            }
+        }
 
         if (isTocOpen) generateTOC();
         renderTabs();
@@ -1232,78 +1248,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const label = document.createElement('span');
         label.className = 'item-label';
-        label.textContent = item.name;
         label.title = item.path || item.name;
+
+        // Detectar nomenclatura con corchetes al inicio: [TAG1][TAG2]Nombre
+        const bracketMatch = item.name.match(/^((?:\[[^\]]*\])+)(.+)$/);
+        if (bracketMatch) {
+            const tags = document.createElement('span');
+            tags.className = 'item-label-tags';
+            tags.textContent = bracketMatch[1];
+            const name = document.createElement('span');
+            name.className = 'item-label-name';
+            name.textContent = bracketMatch[2];
+            label.appendChild(tags);
+            label.appendChild(name);
+        } else {
+            label.textContent = item.name;
+        }
 
         if (item.type === 'directory') {
             const chevron = document.createElement('span');
             chevron.className = 'chevron';
-            chevron.innerHTML = '▶';
+            chevron.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>`;
             if (isExpanded) {
                 chevron.classList.add('expanded');
-                chevron.innerHTML = '▼';
+                chevron.style.transform = 'rotate(90deg)';
             }
             iconWrapper.appendChild(chevron);
 
-            const folderIcon = document.createElement('span');
-            folderIcon.className = 'folder-icon';
-            iconWrapper.appendChild(folderIcon);
+            const hasIndex = item.children && item.children.some(c => c.name === 'index.html');
+            if (hasIndex) {
+                const protoIcon = document.createElement('span');
+                protoIcon.className = 'file-icon';
+                protoIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>`;
+                iconWrapper.appendChild(protoIcon);
+            }
 
             itemRow.appendChild(iconWrapper);
             itemRow.appendChild(label);
 
-            const newFileBtn = document.createElement('button');
-            newFileBtn.className = 'new-file-btn';
-            newFileBtn.title = 'Nuevo archivo .md';
-            newFileBtn.innerHTML = `
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                    <line x1="12" y1="18" x2="12" y2="12"></line>
-                    <line x1="9" y1="15" x2="15" y2="15"></line>
-                </svg>
-            `;
-            newFileBtn.addEventListener('click', async (e) => {
-                e.stopPropagation(); // Prevent folder expand/collapse
-                const fileName = prompt(`Crear nuevo archivo en ${item.name}/\nEl archivo tendrá extensión .md automáticamente:`, 'nuevo-documento');
-                if (!fileName) return;
-
-                let finalName = fileName.trim();
-                if (!finalName.toLowerCase().endsWith('.md')) {
-                    finalName += '.md';
-                }
-
-                await createNewFile(item, finalName);
-            });
-
-            const newFolderBtn = document.createElement('button');
-            newFolderBtn.className = 'new-folder-btn action-btn';
-            newFolderBtn.title = 'Nueva carpeta';
-            newFolderBtn.innerHTML = `
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                    <line x1="12" y1="11" x2="12" y2="17"></line>
-                    <line x1="9" y1="14" x2="15" y2="14"></line>
-                </svg>
-            `;
-
-            newFolderBtn.addEventListener('click', async (e) => {
-                e.stopPropagation(); // Prevent folder expand/collapse
-                if (currentGitHubRepo) {
-                    showToast('La creación de carpetas no está disponible en modo GitHub.', 'warning');
-                    return;
-                }
-                const folderName = prompt(`Crear nueva carpeta en ${item.name}/:\nIntroduce el nombre para la nueva carpeta:`, 'nueva-carpeta');
-                if (!folderName || !folderName.trim()) return;
-
-                await createNewFolder(item, folderName.trim());
-            });
+            // Botón copiar ruta de carpeta
+            const rootDir = localStorage.getItem('pmos_last_folder') || '';
+            const relativePath = item.path || item.name;
+            const fullPath = rootDir ? (rootDir + '/' + relativePath) : relativePath;
 
             const actionsContainer = document.createElement('div');
             actionsContainer.style.display = 'flex';
             actionsContainer.style.alignItems = 'center';
-            actionsContainer.appendChild(newFolderBtn);
-            actionsContainer.appendChild(newFileBtn);
+            actionsContainer.appendChild(createCopyPathBtn(fullPath));
+            if (hasIndex) {
+                actionsContainer.appendChild(createServeBtn(fullPath, item.name));
+            }
 
             itemRow.appendChild(actionsContainer);
 
@@ -1331,7 +1325,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isCurrentlyExpanded = childrenContainer.style.display !== 'none';
                 childrenContainer.style.display = isCurrentlyExpanded ? 'none' : 'block';
                 chevron.classList.toggle('expanded');
-                chevron.innerHTML = isCurrentlyExpanded ? '▶' : '▼';
+                chevron.style.transform = isCurrentlyExpanded ? '' : 'rotate(90deg)';
                 // Track expanded state
                 if (isCurrentlyExpanded) {
                     expandedFolders.delete(itemPath);
@@ -1342,12 +1336,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
         } else {
+
             const fileIcon = document.createElement('span');
-            fileIcon.className = item.name.endsWith('.html') ? 'file-icon icon-html' : 'file-icon icon-md';
+            fileIcon.className = 'file-icon';
+            if (item.name.endsWith('.html')) {
+                fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>`;
+            } else {
+                fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+            }
             iconWrapper.appendChild(fileIcon);
 
             itemRow.appendChild(iconWrapper);
             itemRow.appendChild(label);
+
+            // Botón copiar ruta (visible en hover)
+            const rootDir = localStorage.getItem('pmos_last_folder') || '';
+            const relativePath = item.path || item.name;
+            const fullPath = rootDir ? (rootDir + '/' + relativePath) : relativePath;
+            itemRow.appendChild(createCopyPathBtn(fullPath));
+
             itemContainer.appendChild(itemRow);
 
             // Make file items draggable for terminal attachment
@@ -1368,6 +1375,71 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         return itemContainer;
+    }
+
+    // Helper: crea un botón de copiar ruta para el sidebar
+    function createCopyPathBtn(copyValue) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-path-btn';
+        btn.title = copyValue;
+        btn.innerHTML = `<svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/><path stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(copyValue);
+            showToast('Ruta copiada', 'success');
+        });
+        return btn;
+    }
+
+    // Helper: crea un botón para servir una carpeta como prototipo
+    function createServeBtn(folderPath, folderName) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-path-btn'; // reutilizar estilo hover
+        btn.title = 'Servir como prototipo';
+        btn.innerHTML = `<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await openPrototypeTab(folderPath, folderName);
+        });
+        return btn;
+    }
+
+    // Abre un prototipo: levanta servidor estático y lo muestra en webview
+    async function openPrototypeTab(folderPath, folderName) {
+        if (typeof window.require === 'undefined') return;
+
+        const tabId = `proto:${folderPath}`;
+        const existing = openTabs.find(t => t.id === tabId);
+        if (existing) { setActiveTab(tabId); return; }
+
+        showToast(`Levantando servidor para ${folderName}...`, 'info', 2000);
+
+        const { ipcRenderer } = window.require('electron');
+        const result = await ipcRenderer.invoke('proto-server-start', folderPath);
+
+        if (!result.ok) {
+            showToast(`Error: ${result.error}`, 'warning', 4000);
+            return;
+        }
+
+        const url = `http://localhost:${result.port}`;
+        const tab = {
+            id: tabId,
+            name: `▶ ${folderName}`,
+            path: null,
+            handle: null,
+            isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+            isCoda: true, // Reutilizar mecanismo webview
+            codaId: tabId,
+            codaEmbedUrl: url,
+            protoFolderPath: folderPath,
+            content: '', rawContent: '', savedContent: '', dirty: false
+        };
+
+        openTabs.push(tab);
+        setActiveTab(tabId);
+        saveWorkspaceState();
+        showToast(`Prototipo servido en puerto ${result.port}`, 'success');
     }
 
     // ===================================
@@ -1408,16 +1480,26 @@ document.addEventListener('DOMContentLoaded', () => {
         tabsContainer.innerHTML = '';
         openTabs.forEach((tabData, index) => {
             const tabEl = document.createElement('div');
-            tabEl.className = `tab ${tabData.id === activeTabId ? 'active' : ''}`;
+            const isActive = tabData.id === activeTabId;
+            const isInSplit = splitGroup && (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
+            const isSplitPartner = splitGroup && tabData.id !== activeTabId &&
+                (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
+            tabEl.className = `tab${isActive ? ' active' : ''}${isSplitPartner ? ' in-split' : ''}`;
             tabEl.style.display = 'flex';
             tabEl.draggable = true;
             tabEl.dataset.tabIndex = index;
 
             const dirtyDot = (!tabData.isCoda && tabData.dirty) ? '<span class="dirty-dot">●</span>' : '';
-            const iconClass = tabData.isCoda ? '' : (tabData.isHtml ? 'icon-html' : 'icon-md');
-            const iconHtml = tabData.isCoda
-                ? `<svg class="coda-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>`
-                : `<span class="file-icon ${iconClass}"></span>`;
+            let iconHtml;
+            if (tabData.protoFolderPath) {
+                iconHtml = `<svg class="coda-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+            } else if (tabData.isCoda) {
+                iconHtml = `<svg class="coda-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>`;
+            } else if (tabData.isHtml) {
+                iconHtml = `<span class="file-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span>`;
+            } else {
+                iconHtml = `<span class="file-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>`;
+            }
             tabEl.innerHTML = `
                 ${iconHtml}
                 <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}</span>${dirtyDot}
@@ -1425,7 +1507,8 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             tabEl.addEventListener('click', (e) => {
-                if (!e.target.classList.contains('close-tab')) setActiveTab(tabData.id);
+                if (e.target.classList.contains('close-tab')) return;
+                setActiveTab(tabData.id);
             });
 
             tabEl.querySelector('.close-tab').addEventListener('click', (e) => {
@@ -1433,12 +1516,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeTab(tabData.id);
             });
 
-            // Drag reorder
+            // Drag reorder + drag path to terminal
             tabEl.addEventListener('dragstart', (e) => {
                 draggedTabId = tabData.id;
                 tabEl.classList.add('tab-dragging');
-                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.effectAllowed = 'copyMove';
                 e.dataTransfer.setData('text/x-tab-reorder', tabData.id);
+
+                // Ruta absoluta para arrastrar al terminal
+                if (tabData.path) {
+                    const rootDir = localStorage.getItem('pmos_last_folder') || '';
+                    const absolutePath = rootDir ? (rootDir + '/' + tabData.path) : tabData.path;
+                    e.dataTransfer.setData('text/plain', absolutePath);
+                }
             });
 
             tabEl.addEventListener('dragend', () => {
@@ -1473,6 +1563,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveWorkspaceState();
             });
 
+            // Context menu (clic derecho)
+            tabEl.addEventListener('contextmenu', (e) => showTabContextMenu(e, tabData));
+
             tabsContainer.appendChild(tabEl);
         });
 
@@ -1495,11 +1588,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTabs();
         saveWorkspaceState();
 
-        // Load notes for new active tab
-        if (fileId) {
-            if (isNotesOpen) loadNoteForFile(fileId);
-            updateNotesIndicator(fileId);
-        }
 
         document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
         if (fileId) {
@@ -1590,6 +1678,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!h || h.undoStack.length === 0) {
                 initHistory(fileId, markdownEditor.value);
             }
+
+            // Split view: mostrar u ocultar según el tab activo pertenezca al grupo
+            if (splitGroup && (fileId === splitGroup.left || fileId === splitGroup.right)) {
+                showSplitForTab(fileId);
+            } else {
+                hideSplitPanels();
+            }
         } else {
             editorToolbar.style.display = 'none';
             isEditorOpen = false;
@@ -1610,12 +1705,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 tocList.innerHTML = '<p class="toc-empty">Abre un archivo para ver su estructura.</p>';
             }
 
-            // Hide Notes panel
-            const notesPanel = document.getElementById('notesPanel');
-            if (notesPanel) {
-                notesPanel.style.display = 'none';
-                isNotesOpen = false;
-            }
         }
     }
 
@@ -1623,6 +1712,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const tab = openTabs.find(t => t.id === fileId);
         if (tab && tab.dirty) {
             if (!confirm(`El archivo "${tab.name}" tiene cambios sin guardar. ¿Cerrar de todos modos?`)) return;
+        }
+
+        // Parar servidor de prototipo si lo tiene
+        if (tab && tab.protoFolderPath && typeof window.require !== 'undefined') {
+            const { ipcRenderer } = window.require('electron');
+            ipcRenderer.invoke('proto-server-stop', tab.protoFolderPath);
+        }
+
+        // Si el tab está en el split group, deshacer el split
+        if (splitGroup && (fileId === splitGroup.left || fileId === splitGroup.right)) {
+            closeSplitView();
         }
 
         const index = openTabs.findIndex(t => t.id === fileId);
@@ -1639,6 +1739,291 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveWorkspaceState();
             }
         }
+    }
+
+    // ===================================
+    // SPLIT VIEW (vista dividida tipo Chrome)
+    // ===================================
+    // splitGroup = { left: tabId, right: tabId } — par de tabs emparejados
+    // Al activar un tab del par, se muestra el split. Al activar otro tab, vista completa.
+
+    const splitPanel = document.getElementById('splitPanel');
+    const splitDivider = document.getElementById('splitDivider');
+    const splitMarkdownContent = document.getElementById('splitMarkdownContent');
+    const splitPanelFilename = document.getElementById('splitPanelFilename');
+    const splitPanelClose = document.getElementById('splitPanelClose');
+
+    function createSplitGroup(leftTabId, rightTabId) {
+        splitGroup = { left: leftTabId, right: rightTabId };
+        splitFlexPct = 50;
+        // Activar el tab izquierdo para que se muestre el split
+        setActiveTab(leftTabId);
+    }
+
+    function closeSplitView() {
+        splitGroup = null;
+        hideSplitPanels();
+        renderTabs();
+    }
+
+    function hideSplitPanels() {
+        splitDivider.style.display = 'none';
+        splitPanel.style.display = 'none';
+        splitMarkdownContent.innerHTML = '';
+        const previewPanel = document.getElementById('previewPanel');
+        previewPanel.style.flex = '1';
+    }
+
+    // Muestra el split con el contenido del tab compañero
+    function showSplitForTab(activeId) {
+        if (!splitGroup) return;
+
+        const partnerId = splitGroup.left === activeId ? splitGroup.right : splitGroup.left;
+        const partnerTab = openTabs.find(t => t.id === partnerId);
+        if (!partnerTab) {
+            closeSplitView();
+            return;
+        }
+
+        splitPanelFilename.textContent = partnerTab.name;
+        splitPanelFilename.title = partnerTab.path || partnerTab.name;
+
+        if (partnerTab.content) {
+            splitMarkdownContent.innerHTML = partnerTab.content;
+        } else {
+            splitMarkdownContent.innerHTML = '<div class="loading-state">Cargando...</div>';
+            loadSplitContent(partnerTab);
+        }
+
+        const previewPanel = document.getElementById('previewPanel');
+        previewPanel.style.flex = `0 0 ${splitFlexPct}%`;
+        splitPanel.style.flex = `0 0 ${100 - splitFlexPct}%`;
+
+        splitDivider.style.display = 'block';
+        splitPanel.style.display = 'flex';
+    }
+
+    async function loadSplitContent(tabData) {
+        try {
+            let markdownText = '';
+            if (tabData.isLocal && tabData.handle) {
+                const file = await tabData.handle.getFile();
+                markdownText = await file.text();
+            } else if (tabData.isNode) {
+                const res = await fetch(`/api/file?path=${encodeURIComponent(tabData.path)}`);
+                if (!res.ok) throw new Error('Error al leer el archivo');
+                markdownText = await res.text();
+            } else if (tabData.isGitHub) {
+                const data = await GitHubAPI.getFileContent(
+                    tabData.githubMeta.owner, tabData.githubMeta.repo, tabData.path
+                );
+                markdownText = data.content;
+            }
+
+            if (tabData.isHtml) {
+                const blob = new Blob([markdownText], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                tabData.content = `<div class="html-preview-wrapper"><div class="html-preview-frame desktop"><iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe></div></div>`;
+            } else {
+                tabData.rawContent = markdownText;
+                tabData.savedContent = markdownText;
+                tabData.content = typeof marked !== 'undefined'
+                    ? DOMPurify.sanitize(marked.parse(markdownText))
+                    : markdownText;
+            }
+
+            // Actualizar si sigue siendo el partner visible
+            if (splitGroup) {
+                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+                if (tabData.id === partnerId) {
+                    splitMarkdownContent.innerHTML = tabData.content;
+                }
+            }
+        } catch (err) {
+            if (splitGroup) {
+                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+                if (tabData.id === partnerId) {
+                    splitMarkdownContent.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
+                }
+            }
+        }
+    }
+
+    splitPanelClose.addEventListener('click', closeSplitView);
+
+    // --- Split divider drag resize ---
+    splitDivider.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const container = splitDivider.parentElement;
+        const previewPanel = document.getElementById('previewPanel');
+        const containerRect = container.getBoundingClientRect();
+
+        const previewRect = previewPanel.getBoundingClientRect();
+        const offsetLeft = previewRect.left - containerRect.left;
+        const availableWidth = containerRect.width - offsetLeft;
+
+        splitDivider.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        _blockWebviews();
+
+        function onMouseMove(ev) {
+            const x = ev.clientX - previewRect.left;
+            const minPx = 150;
+            const clamped = Math.max(minPx, Math.min(x, availableWidth - minPx));
+            const pct = (clamped / availableWidth) * 100;
+
+            previewPanel.style.flex = `0 0 ${pct}%`;
+            splitPanel.style.flex = `0 0 ${100 - pct}%`;
+            splitFlexPct = pct;
+        }
+
+        function onMouseUp() {
+            splitDivider.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            _unblockWebviews();
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    document.addEventListener('contextmenu', (e) => {
+        if (!e.target.closest('.tab')) removeContextMenu();
+    });
+
+    function showTabContextMenu(e, tabData) {
+        e.preventDefault();
+        removeContextMenu();
+
+        const menu = document.createElement('div');
+        menu.className = 'tab-context-menu';
+
+        const isActive = tabData.id === activeTabId;
+        const isInSplit = splitGroup && (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
+        const svgSplit = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3h6v18H9zM3 3h6v18H3z"/>
+        </svg>`;
+
+        if (isInSplit) {
+            // Tab está en un split → ofrecer deshacer
+            const unsplitItem = document.createElement('div');
+            unsplitItem.className = 'tab-context-menu-item';
+            unsplitItem.innerHTML = `${svgSplit} Deshacer vista dividida`;
+            unsplitItem.addEventListener('click', () => {
+                removeContextMenu();
+                closeSplitView();
+            });
+            menu.appendChild(unsplitItem);
+        } else if (isActive && openTabs.length > 1) {
+            // Tab activo, no en split → submenu con lista de tabs para emparejar
+            const splitHeader = document.createElement('div');
+            splitHeader.className = 'tab-context-menu-item';
+            splitHeader.style.opacity = '0.5';
+            splitHeader.style.cursor = 'default';
+            splitHeader.style.fontSize = '0.7rem';
+            splitHeader.innerHTML = `${svgSplit} Vista dividida con:`;
+            menu.appendChild(splitHeader);
+
+            openTabs.filter(t => t.id !== tabData.id).forEach(otherTab => {
+                const pickItem = document.createElement('div');
+                pickItem.className = 'tab-context-menu-item';
+                pickItem.style.paddingLeft = '28px';
+                pickItem.textContent = otherTab.name;
+                pickItem.addEventListener('click', () => {
+                    removeContextMenu();
+                    createSplitGroup(tabData.id, otherTab.id);
+                });
+                menu.appendChild(pickItem);
+            });
+        } else if (!isActive) {
+            // Tab no activo → ofrecer split directo con la pestaña activa
+            const activeTab = openTabs.find(t => t.id === activeTabId);
+            if (activeTab) {
+                const splitItem = document.createElement('div');
+                splitItem.className = 'tab-context-menu-item';
+                splitItem.innerHTML = `${svgSplit} Vista dividida con "${activeTab.name}"`;
+                splitItem.addEventListener('click', () => {
+                    removeContextMenu();
+                    createSplitGroup(activeTabId, tabData.id);
+                });
+                menu.appendChild(splitItem);
+            }
+        }
+
+        // Copiar URL para prototipos
+        if (tabData.protoFolderPath && tabData.codaEmbedUrl) {
+            const copyUrlItem = document.createElement('div');
+            copyUrlItem.className = 'tab-context-menu-item';
+            copyUrlItem.innerHTML = `
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+                    <path stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                </svg>
+                Copiar URL (${tabData.codaEmbedUrl})
+            `;
+            copyUrlItem.addEventListener('click', () => {
+                removeContextMenu();
+                navigator.clipboard.writeText(tabData.codaEmbedUrl);
+                showToast('URL copiada al portapapeles', 'success');
+            });
+            menu.appendChild(copyUrlItem);
+        }
+
+        // Separador
+        if (menu.children.length > 0) {
+            const sep = document.createElement('div');
+            sep.style.cssText = 'height: 1px; background: var(--border-color); margin: 4px 0;';
+            menu.appendChild(sep);
+        }
+
+        // Cerrar pestaña
+        const closeItem = document.createElement('div');
+        closeItem.className = 'tab-context-menu-item';
+        closeItem.innerHTML = `
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            Cerrar pestaña
+        `;
+        closeItem.addEventListener('click', () => {
+            removeContextMenu();
+            closeTab(tabData.id);
+        });
+        menu.appendChild(closeItem);
+
+        // Cerrar otras pestañas
+        if (openTabs.length > 1) {
+            const closeOthersItem = document.createElement('div');
+            closeOthersItem.className = 'tab-context-menu-item';
+            closeOthersItem.innerHTML = `
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                Cerrar otras pestañas
+            `;
+            closeOthersItem.addEventListener('click', () => {
+                removeContextMenu();
+                const others = openTabs.filter(t => t.id !== tabData.id).map(t => t.id);
+                others.forEach(id => closeTab(id));
+            });
+            menu.appendChild(closeOthersItem);
+        }
+
+        // Posicionar menú
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        document.body.appendChild(menu);
+
+        // Ajustar si se sale de pantalla
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+
+        activeContextMenu = menu;
     }
 
     // ===================================
@@ -1699,6 +2084,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 initHistory(tabData.id, tabData.rawContent);
                 if (isTocOpen) generateTOC();
             }
+            // Actualizar split view si este tab es el partner visible
+            if (splitGroup && splitMarkdownContent) {
+                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+                if (tabData.id === partnerId) {
+                    splitMarkdownContent.innerHTML = tabData.content;
+                }
+            }
 
         } catch (error) {
             console.error('Error opening file:', error);
@@ -1706,6 +2098,12 @@ document.addEventListener('DOMContentLoaded', () => {
             tabData.rawContent = '';
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
+            }
+            if (splitGroup && splitMarkdownContent) {
+                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+                if (tabData.id === partnerId) {
+                    splitMarkdownContent.innerHTML = tabData.content;
+                }
             }
         }
     }
@@ -1863,128 +2261,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // CREATION
     // ===================================
 
-    async function createNewFile(folderItem, fileName) {
-        try {
-            if (currentLocalFolderHandle) {
-                // Es un archivo local
-                let targetDirHandle = currentLocalFolderHandle;
-
-                // Si la carpeta no es la raíz, tenemos que navegar a ella
-                if (folderItem.path !== currentLocalFolderHandle.name) {
-                    // El path en local es "Raiz/Sub/Dir". Quitamos la raíz.
-                    const relPath = folderItem.path.substring(currentLocalFolderHandle.name.length + 1);
-                    const parts = relPath.split('/');
-                    for (const part of parts) {
-                        targetDirHandle = await targetDirHandle.getDirectoryHandle(part);
-                    }
-                }
-
-                // Crear el archivo (esto fallará si ya existe)
-                const newFileHandle = await targetDirHandle.getFileHandle(fileName, { create: true });
-                // Refrescar el árbol
-                lastTreeHash = null;
-                await renderLocalFolder(currentLocalFolderHandle);
-
-                showToast(`Archivo <strong>${fileName}</strong> creado localmente.`, 'success');
-            } else if (currentNodeServer) {
-                const newFilePath = folderItem.path ? `${folderItem.path}/${fileName}` : fileName;
-                const initialContent = `# ${fileName.replace('.md', '')}\n\n`;
-
-                showToast(`Creando <strong>${fileName}</strong> en el servidor local...`, 'info', 2000);
-
-                const res = await fetch('/api/file', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        path: newFilePath,
-                        content: initialContent
-                    })
-                });
-
-                if (!res.ok) throw new Error('Error al crear archivo en el servidor local');
-
-                lastTreeHash = null;
-                await renderNodeFolder();
-
-                showToast(`Archivo <strong>${fileName}</strong> creado.`, 'success');
-            } else if (currentGitHubRepo) {
-                // Es un archivo en GitHub
-                const newFilePath = folderItem.path ? `${folderItem.path}/${fileName}` : fileName;
-                const initialContent = `# ${fileName.replace('.md', '')}\n\n`;
-
-                showToast(`Creando <strong>${fileName}</strong> en GitHub...`, 'info', 2000);
-
-                await GitHubAPI.saveFile(
-                    currentGitHubRepo.owner,
-                    currentGitHubRepo.repo,
-                    newFilePath,
-                    initialContent,
-                    null // null SHA means create new file
-                );
-
-                // Refrescar el árbol de GitHub y volver a renderizar
-                fileTreeContainer.innerHTML = '<div class="loading-state">Actualizando repositorio...</div>';
-                lastTreeHash = null;
-                const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
-                fileTreeContainer.innerHTML = '';
-                fileTreeContainer.appendChild(renderTreeItem(treeData, true));
-
-                showToast(`Archivo <strong>${fileName}</strong> creado en GitHub.`, 'success');
-            }
-        } catch (err) {
-            console.error('Error creating file:', err);
-            showToast(`Error al crear archivo: ${err.message}`, 'warning', 5000);
-        }
-    }
-
-    async function createNewFolder(folderItem, folderName) {
-        try {
-            if (currentLocalFolderHandle) {
-                // Es un archivo local (File System Access)
-                let targetDirHandle = currentLocalFolderHandle;
-
-                // Si la carpeta no es la raíz, navegar a ella
-                if (folderItem.path !== currentLocalFolderHandle.name) {
-                    const relPath = folderItem.path.substring(currentLocalFolderHandle.name.length + 1);
-                    const parts = relPath.split('/');
-                    for (const part of parts) {
-                        targetDirHandle = await targetDirHandle.getDirectoryHandle(part);
-                    }
-                }
-
-                // Crear la carpeta (getDirectoryHandle con create: true)
-                await targetDirHandle.getDirectoryHandle(folderName, { create: true });
-
-                // Refrescar el árbol
-                lastTreeHash = null;
-                await renderLocalFolder(currentLocalFolderHandle);
-
-                showToast(`Carpeta <strong>${folderName}</strong> creada localmente.`, 'success');
-
-            } else if (currentNodeServer) {
-                // Servidor Node Backend
-                const targetPath = folderItem.path ? folderItem.path : '';
-                const newFolderPath = targetPath ? `${targetPath}/${folderName}` : folderName;
-
-                const res = await fetch('/api/folder', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: newFolderPath })
-                });
-
-                if (!res.ok) throw new Error('Error al crear la carpeta en el servidor');
-
-                lastTreeHash = null;
-                await renderNodeFolder();
-
-                showToast(`Carpeta <strong>${folderName}</strong> creada en el servidor.`, 'success');
-            }
-        } catch (err) {
-            console.error('Error creating folder:', err);
-            showToast(`Error al crear carpeta: ${err.message}`, 'warning', 5000);
-        }
-    }
-
     // ===================================
     // GUARDADO
     // ===================================
@@ -2076,26 +2352,61 @@ document.addEventListener('DOMContentLoaded', () => {
     // VISIBILIDAD DEL TOC
     // ===================================
 
+    const tocResizer = document.getElementById('tocResizer');
+
     function updateTocVisibility() {
         // Hide TOC for Coda tabs
         const activeTabId = document.querySelector('.tab.active')?.dataset.id;
         const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
         if (activeTab && activeTab.isCoda) {
             tocPanel.style.display = 'none';
+            tocResizer.style.display = 'none';
             return;
         }
 
         if (isTocOpen) {
             tocPanel.style.display = 'flex';
+            tocResizer.style.display = 'block';
             toggleTocBtn.classList.add('active');
             toggleTocBtn.style.backgroundColor = 'var(--bg-hover)';
             generateTOC();
         } else {
             tocPanel.style.display = 'none';
+            tocResizer.style.display = 'none';
             toggleTocBtn.classList.remove('active');
             toggleTocBtn.style.backgroundColor = '';
         }
     }
+
+    // TOC resizer drag
+    tocResizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = tocPanel.offsetWidth;
+
+        tocResizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        _blockWebviews();
+
+        function onMouseMove(ev) {
+            const delta = startX - ev.clientX;
+            const newWidth = Math.max(120, startWidth + delta);
+            tocPanel.style.width = newWidth + 'px';
+        }
+
+        function onMouseUp() {
+            tocResizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            _unblockWebviews();
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
 
     // ===================================
     // GENERACIÓN DE TOC
@@ -2200,7 +2511,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.removeChild(mirror);
 
         const lineHeight = parseFloat(cs.lineHeight) || 22;
-        markdownEditor.scrollTop = Math.max(0, targetScrollTop - parseFloat(cs.paddingTop) - lineHeight);
+        const scrollContainer = markdownEditor.closest('.editor-with-lines') || markdownEditor;
+        scrollContainer.scrollTop = Math.max(0, targetScrollTop - parseFloat(cs.paddingTop) - lineHeight);
     }
 
     // ===================================
@@ -2381,12 +2693,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.removeChild(mirror);
 
         const lineHeight = parseFloat(cs.lineHeight) || 22;
-        const currentScroll = markdownEditor.scrollTop;
-        const editorHeight = markdownEditor.clientHeight;
         const targetTop = targetScrollTop - parseFloat(cs.paddingTop);
 
-        if (targetTop < currentScroll || targetTop > currentScroll + editorHeight - lineHeight * 2) {
-            markdownEditor.scrollTop = Math.max(0, targetTop - lineHeight * 2);
+        const scrollContainer = markdownEditor.closest('.editor-with-lines') || markdownEditor;
+        const currentScroll = scrollContainer.scrollTop;
+        const containerHeight = scrollContainer.clientHeight;
+        if (targetTop < currentScroll || targetTop > currentScroll + containerHeight - lineHeight * 2) {
+            scrollContainer.scrollTop = Math.max(0, targetTop - lineHeight * 2);
         }
     }
 
@@ -2723,6 +3036,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sidebarResizer.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
+            _blockWebviews();
             e.preventDefault();
         });
 
@@ -2742,6 +3056,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
                 sidebarEl.style.transition = '';
+                _unblockWebviews();
             }
         });
     }
@@ -2759,6 +3074,7 @@ document.addEventListener('DOMContentLoaded', () => {
             codaResizer.classList.add('is-resizing');
             document.body.style.cursor = 'row-resize';
             document.body.style.userSelect = 'none';
+            _blockWebviews();
             
             startY = e.clientY;
             startHeight = fileTreeEl.getBoundingClientRect().height;
@@ -2788,6 +3104,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 codaResizer.classList.remove('is-resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
+                _unblockWebviews();
             }
         });
     }
@@ -2805,6 +3122,7 @@ document.addEventListener('DOMContentLoaded', () => {
             notionResizer.classList.add('is-resizing');
             document.body.style.cursor = 'row-resize';
             document.body.style.userSelect = 'none';
+            _blockWebviews();
             
             startYNotion = e.clientY;
             startHeightNotion = codaSectionEl.getBoundingClientRect().height;
@@ -2832,6 +3150,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 notionResizer.classList.remove('is-resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
+                _unblockWebviews();
             }
         });
     }
@@ -3207,6 +3526,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
 
                                 row.addEventListener('click', () => openCodaApiPage(doc, pageNode, row));
+                                const codaUrl = pageNode.browserLink || `https://coda.io/d/${doc.id}/${pageNode.id}`;
+                                row.appendChild(createCopyPathBtn(codaUrl));
                                 containerUl.appendChild(wrap);
                             }
 
@@ -3231,6 +3552,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const treeEl = codaSection?.querySelector('.coda-api-tree');
             if (treeEl) treeEl.remove();
         }
+
+        // ---- Refresh buttons ----
+        document.getElementById('refreshCodaBtn')?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const btn = e.currentTarget;
+            btn.classList.add('spinning');
+            await loadCodaTree();
+            btn.classList.remove('spinning');
+            showToast('Árbol de Coda actualizado', 'success');
+        });
+
+        document.getElementById('refreshNotionBtn')?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const btn = e.currentTarget;
+            btn.classList.add('spinning');
+            await loadNotionTree();
+            btn.classList.remove('spinning');
+            showToast('Árbol de Notion actualizado', 'success');
+        });
 
         // ---- Open a Coda page via API ----
         async function openCodaApiPage(doc, page, clickedEl) {
@@ -3319,7 +3659,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${title}</span>`;
                 
                 row.addEventListener('click', () => openNotionApiPage(page, title, row));
-                
+                const notionUrl = page.url || `https://notion.so/${page.id.replace(/-/g, '')}`;
+                row.appendChild(createCopyPathBtn(notionUrl));
+
                 li.appendChild(row);
                 treeEl.appendChild(li);
             });
@@ -3372,23 +3714,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // ============================================================
     (function () {
         const codaPanel  = document.getElementById('codaPanel');
-        const codaFrame  = document.getElementById('codaFrame');
+        let codaFrame  = document.getElementById('codaFrame');
 
         if (!codaPanel || !codaFrame) return;
 
+        let currentWebviewUrl = '';
+
         // ---- Expose Coda panel switcher for setActiveTab ----
-        // webview uses loadURL() not .src assignment
         window._showCodaPanel = (url) => {
             codaPanel.style.display = 'flex';
-            // Use setAttribute for webview (more reliable than loadURL before dom-ready)
-            if (codaFrame.tagName === 'WEBVIEW' || codaFrame.getAttribute) {
-                const current = codaFrame.getAttribute('src');
-                if (current !== url) {
-                    codaFrame.setAttribute('src', url);
-                }
-            } else {
-                codaFrame.src = url;
-            }
+            if (url === currentWebviewUrl) return;
+            currentWebviewUrl = url;
+            // Forzar navegación: reemplazar el webview entero para evitar problemas de cache
+            const parent = codaFrame.parentElement;
+            const newFrame = codaFrame.cloneNode(false);
+            newFrame.setAttribute('src', url);
+            parent.replaceChild(newFrame, codaFrame);
+            codaFrame = newFrame;
         };
 
         window._hideCodaPanel = () => {
@@ -3547,6 +3889,30 @@ document.addEventListener('DOMContentLoaded', () => {
             return tab ? tab.name : null;
         },
         showCustomPrompt: (msg, def) => showCustomPrompt(msg, def)
+    };
+
+    // Exponer openFileTab para que chat.js pueda abrir archivos desde el terminal
+    window.openFileInViewer = (filePath) => {
+        const rootDir = (localStorage.getItem('pmos_last_folder') || '').normalize('NFC');
+        let pathForTab = filePath.normalize('NFC');
+        // Si es ruta absoluta dentro del proyecto, convertir a relativa
+        if (rootDir && pathForTab.startsWith(rootDir + '/')) {
+            pathForTab = pathForTab.slice(rootDir.length + 1);
+        }
+        const name = pathForTab.split('/').pop();
+        openFileTab({ path: pathForTab, name, type: 'file' });
+    };
+
+    // Exponer lista de archivos del proyecto para el link provider del terminal
+    window.getProjectFiles = () => {
+        function collect(node) {
+            let files = [];
+            if (node.type === 'file') files.push({ path: node.path, name: node.name });
+            if (node.children) node.children.forEach(c => { files = files.concat(collect(c)); });
+            return files;
+        }
+        const tree = fileTreeContainer?._treeData;
+        return tree ? collect(tree) : [];
     };
 
     // Registrar callback en el controlador de terminal para activación bidireccional

@@ -9,7 +9,7 @@
  *   Ctrl+Shift+W  →  cerrar panel activo
  */
 
-let Terminal, FitAddon, WebglAddon;
+let Terminal, FitAddon, WebglAddon, WebLinksAddon;
 
 function loadTerminalLibs() {
     if (Terminal) return true;
@@ -19,6 +19,7 @@ function loadTerminalLibs() {
             Terminal = xterm.Terminal || xterm;
             FitAddon = window.require('@xterm/addon-fit').FitAddon;
             try { WebglAddon = window.require('@xterm/addon-webgl').WebglAddon; } catch (_) {}
+            try { WebLinksAddon = window.require('@xterm/addon-web-links').WebLinksAddon; } catch (_) {}
             return !!Terminal;
         }
     } catch (e) { console.error('Error xterm libs:', e); }
@@ -306,6 +307,9 @@ class TerminalController {
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
+        if (WebLinksAddon) {
+            term.loadAddon(new WebLinksAddon());
+        }
         term.open(termEl);
 
         // WebGL renderer: reduce el flickering del status bar de TUIs como Gemini
@@ -316,6 +320,166 @@ class TerminalController {
                 term.loadAddon(webgl);
             } catch (_) { /* fallback al canvas renderer si WebGL no está disponible */ }
         }
+
+        // Link provider: rutas de archivo clickeables que abren en el visor
+        // Link provider: rutas de archivo clickeables que abren en el visor
+        const VIEWABLE_EXT = new Set(['md','html','htm','txt','js','jsx','ts','tsx','css','scss',
+            'json','yaml','yml','xml','svg','py','rb','go','rs','java','c','cpp','h',
+            'sh','bash','zsh','toml','ini','cfg','env','log','sql','graphql','vue',
+            'svelte','astro','php','swift','kt','cs','r','lua','zig','mjs','cjs']);
+        const _isViewable = (p) => VIEWABLE_EXT.has(p.split('.').pop().toLowerCase());
+        const _isInProject = (p) => {
+            const root = localStorage.getItem('pmos_last_folder');
+            if (!root) return false;
+            // Ruta absoluta dentro del proyecto
+            if (p.startsWith('/')) return p.startsWith(root + '/') || p === root;
+            // Ruta relativa: siempre está dentro del proyecto (CWD = root)
+            return !p.startsWith('..');
+        };
+        term.registerLinkProvider({
+            provideLinks: (lineNumber, callback) => {
+                const buf = term.buffer.active;
+                // Concatenar líneas wrapped para obtener el texto lógico completo
+                // Buscar la primera línea real (no wrapped) hacia arriba
+                let startRow = lineNumber - 1;
+                while (startRow > 0 && buf.getLine(startRow)?.isWrapped) startRow--;
+                let fullText = '';
+                const rowLengths = []; // longitud de cada fila visual
+                for (let r = startRow; r < buf.length; r++) {
+                    const l = buf.getLine(r);
+                    if (!l) break;
+                    if (r > startRow && !l.isWrapped) break;
+                    // No recortar espacios en filas intermedias (wrapped) para preservar
+                    // espacios en el punto de corte al concatenar
+                    const nextIsWrapped = buf.getLine(r + 1)?.isWrapped;
+                    const t = l.translateToString(!nextIsWrapped);
+                    rowLengths.push(t.length);
+                    fullText += t;
+                }
+                // Normalizar Unicode (macOS usa NFD, terminal usa NFC)
+                fullText = fullText.normalize('NFC');
+                const links = [];
+                const root = (localStorage.getItem('pmos_last_folder') || '').normalize('NFC');
+                // Convertir offset en fullText a {x, y} de terminal
+                const offsetToPos = (offset) => {
+                    let remaining = offset;
+                    for (let i = 0; i < rowLengths.length; i++) {
+                        if (remaining < rowLengths[i]) {
+                            return { x: remaining + 1, y: startRow + i + 1 };
+                        }
+                        remaining -= rowLengths[i];
+                    }
+                    const lastRow = startRow + rowLengths.length - 1;
+                    return { x: rowLengths[rowLengths.length - 1] + 1, y: lastRow + 1 };
+                };
+                const addLink = (filePath, startOffset, len) => {
+                    if (!_isViewable(filePath)) return;
+                    const start = offsetToPos(startOffset);
+                    const end = offsetToPos(startOffset + len);
+                    // Solo añadir si esta línea visual forma parte del rango
+                    if (lineNumber < start.y || lineNumber > end.y) return;
+                    if (links.some(l => l.range.start.x === start.x && l.range.start.y === start.y)) return;
+                    const fp = filePath;
+                    links.push({
+                        range: { start, end },
+                        text: fp,
+                        activate: () => { if (window.openFileInViewer) window.openFileInViewer(fp); }
+                    });
+                };
+                // 1) Rutas absolutas del proyecto (con o sin espacios, multi-línea)
+                if (root) {
+                    let searchFrom = 0;
+                    while (true) {
+                        const idx = fullText.indexOf(root + '/', searchFrom);
+                        if (idx === -1) break;
+                        const after = fullText.slice(idx);
+                        const extRe = /\.(\w+)/g;
+                        let em, found = null;
+                        while ((em = extRe.exec(after)) !== null) {
+                            if (VIEWABLE_EXT.has(em[1].toLowerCase())) { found = em; break; }
+                        }
+                        if (found) {
+                            const fullLen = found.index + found[0].length;
+                            addLink(after.slice(0, fullLen), idx, fullLen);
+                            searchFrom = idx + fullLen;
+                        } else {
+                            searchFrom = idx + root.length;
+                        }
+                    }
+                }
+                // 2) Rutas entre comillas: "/.../file.ext"
+                const quotedRe = /["'](\/[^"']+\.\w+)["']/g;
+                let m;
+                while ((m = quotedRe.exec(fullText)) !== null) {
+                    if (_isInProject(m[1])) addLink(m[1], m.index + 1, m[1].length);
+                }
+                // 3) Rutas con backslash-escaped spaces: /path/some\ file.ext
+                const escRe = /(\/(?:[^\s\\]|\\.)+\.\w+)/g;
+                while ((m = escRe.exec(fullText)) !== null) {
+                    const clean = m[1].replace(/\\ /g, ' ').replace(/\\\\/g, '\\');
+                    if (_isInProject(clean)) addLink(clean, m.index, m[1].length);
+                }
+                // 4) Rutas relativas sin espacios: ./path/file.ext, dir/file.ext
+                const relRe = /(?:^|[\s"'(])(\.{0,2}\/[\w.@\-/]+\.\w+)(?::(\d+))?/g;
+                while ((m = relRe.exec(fullText)) !== null) {
+                    const startIdx = m.index + m[0].indexOf(m[1]);
+                    addLink(m[1], startIdx, m[1].length);
+                }
+                // 5) Nombres de archivo conocidos del proyecto (sin ruta, con espacios)
+                //    También detecta nombres truncados con "..." (ej: "Playbook de Evals...md")
+                const projectFiles = typeof window.getProjectFiles === 'function' ? window.getProjectFiles() : [];
+                for (const file of projectFiles) {
+                    const name = file.name.normalize('NFC');
+                    // Match exacto
+                    let idx = 0;
+                    while (true) {
+                        const pos = fullText.indexOf(name, idx);
+                        if (pos === -1) break;
+                        if (!links.some(l => {
+                            const ls = l.range.start.y === startRow + 1 ? l.range.start.x - 1 : 0;
+                            return pos >= ls && pos < ls + l.text.length;
+                        })) {
+                            addLink(file.path, pos, name.length);
+                        }
+                        idx = pos + name.length;
+                    }
+                    // Match truncado: "prefijo...ext" donde el archivo real es "prefijo<rest>.ext"
+                    const dotIdx = name.lastIndexOf('.');
+                    if (dotIdx === -1) continue;
+                    const ext = name.slice(dotIdx); // ".md"
+                    // Buscar patrón: cualquier texto + "..." + extensión
+                    const truncSuffix = '...' + ext;
+                    let ti = 0;
+                    while (true) {
+                        const tpos = fullText.indexOf(truncSuffix, ti);
+                        if (tpos === -1) break;
+                        // Retroceder para encontrar el inicio del nombre truncado
+                        // Buscar el separador anterior (│, |, \n, inicio de línea, "- ")
+                        let tstart = tpos;
+                        while (tstart > 0 && fullText[tstart - 1] !== '│' && fullText[tstart - 1] !== '|' &&
+                               fullText[tstart - 1] !== '\n') {
+                            tstart--;
+                        }
+                        // Quitar espacios iniciales y "- "
+                        while (tstart < tpos && fullText[tstart] === ' ') tstart++;
+                        if (fullText.slice(tstart, tstart + 2) === '- ') tstart += 2;
+                        const truncName = fullText.slice(tstart, tpos + truncSuffix.length);
+                        const prefix = truncName.slice(0, truncName.indexOf('...'));
+                        // Verificar que el nombre real empieza con este prefijo
+                        if (prefix.length >= 3 && name.startsWith(prefix) && name.endsWith(ext)) {
+                            if (!links.some(l => {
+                                const ls = l.range.start.y === startRow + 1 ? l.range.start.x - 1 : 0;
+                                return tstart >= ls && tstart < ls + l.text.length;
+                            })) {
+                                addLink(file.path, tstart, truncName.length);
+                            }
+                        }
+                        ti = tpos + truncSuffix.length;
+                    }
+                }
+                callback(links.length ? links : undefined);
+            }
+        });
 
         term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
 

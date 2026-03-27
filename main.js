@@ -132,8 +132,22 @@ function setupMenu() {
         {
             label: 'View',
             submenu: [
-                { role: 'reload' },
-                { role: 'forceReload' },
+                {
+                    label: 'Reload',
+                    accelerator: 'CmdOrCtrl+R',
+                    click: (_, focusedWindow) => {
+                        if (focusedWindow) {
+                            focusedWindow.webContents.send('soft-refresh');
+                        }
+                    }
+                },
+                {
+                    label: 'Force Reload',
+                    accelerator: 'CmdOrCtrl+Shift+R',
+                    click: (_, focusedWindow) => {
+                        if (focusedWindow) focusedWindow.reload();
+                    }
+                },
                 ...(!app.isPackaged ? [{ role: 'toggleDevTools' }] : []),
                 { type: 'separator' },
                 { role: 'resetZoom' },
@@ -410,7 +424,7 @@ ipcMain.on('set-window-title', (event, data) => {
         const representedPath = typeof data === 'object' ? data.path : null;
         
         targetWindow.setTitle(title);
-        if (representedPath) {
+        if (representedPath && fs.existsSync(representedPath) && fs.statSync(representedPath).isFile()) {
             targetWindow.setRepresentedFilename(representedPath);
         }
     }
@@ -488,6 +502,52 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
     });
 });
 
+// === PROTOTYPE SERVER (servir carpetas como servidor estático) ===
+const protoServers = new Map(); // folderPath → { server, port }
+
+ipcMain.handle('proto-server-start', async (event, folderPath) => {
+    // Si ya hay un servidor para esa carpeta, devolver el puerto existente
+    if (protoServers.has(folderPath)) {
+        return { ok: true, port: protoServers.get(folderPath).port };
+    }
+
+    try {
+        const protoApp = require('express')();
+        protoApp.use(require('express').static(folderPath));
+        // Fallback: servir index.html para SPA
+        protoApp.use((req, res) => {
+            const indexPath = path.join(folderPath, 'index.html');
+            if (fs.existsSync(indexPath)) {
+                res.sendFile(indexPath);
+            } else {
+                res.status(404).send('Not found');
+            }
+        });
+
+        const server = protoApp.listen(0, () => {
+            const port = server.address().port;
+            protoServers.set(folderPath, { server, port });
+            log(`[proto-server] Serving ${folderPath} on port ${port}`);
+        });
+
+        // Esperar a que el servidor esté listo
+        await new Promise((resolve) => server.on('listening', resolve));
+        return { ok: true, port: protoServers.get(folderPath).port };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+});
+
+ipcMain.handle('proto-server-stop', async (event, folderPath) => {
+    const entry = protoServers.get(folderPath);
+    if (entry) {
+        entry.server.close();
+        protoServers.delete(folderPath);
+        log(`[proto-server] Stopped server for ${folderPath}`);
+    }
+    return { ok: true };
+});
+
 app.whenReady().then(async () => {
     setupMenu();
     // Start with a generic directory. The frontend will override this via API per window.
@@ -549,4 +609,10 @@ app.on('will-quit', () => {
         }
     });
     windowData.clear();
+
+    // Close all prototype servers
+    protoServers.forEach(entry => {
+        try { entry.server.close(); } catch (e) { }
+    });
+    protoServers.clear();
 });
