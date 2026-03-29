@@ -1633,27 +1633,54 @@ body {
     color: var(--text-primary);
 }
 
-/* Claude Thinking Animation */
-.terminal-tab.claude-thinking .terminal-tab-name::before {
+/* Terminal Busy Spinner (comandos normales) */
+.terminal-tab.terminal-busy .terminal-tab-name::before {
     content: '';
     display: inline-block;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     margin-right: 6px;
     border: 2px solid var(--text-accent);
     border-right-color: transparent;
     border-radius: 50%;
-    animation: claude-spin 0.8s linear infinite;
+    animation: tab-spin 0.8s linear infinite;
     vertical-align: middle;
 }
 
-@keyframes claude-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+@keyframes tab-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Claude Thinking — spinner color Claude */
+.terminal-tab.claude-thinking .terminal-tab-name::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border: 2px solid #D97757;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: tab-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+/* Claude Waiting — necesita acción del usuario */
+.terminal-tab.claude-waiting .terminal-tab-name::before {
+    content: '✦';
+    display: inline-block;
+    margin-right: 5px;
+    color: #D97757;
+    font-size: 14px;
+    line-height: 1;
+    animation: claude-attention 2s ease-in-out infinite;
+    vertical-align: middle;
+}
+
+@keyframes claude-attention {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
 
 .terminal-tab.active {

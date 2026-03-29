@@ -18,6 +18,7 @@
 const pty = require('node-pty');
 const crypto = require('crypto');
 const os = require('os');
+const path = require('path');
 
 // crypto.randomUUID() is available since Node 14.17 – no extra dependency needed
 const uuidv4 = () => crypto.randomUUID();
@@ -46,6 +47,24 @@ function startTerminal(cwd, command, onData, onExit) {
     // Make it a login shell so it loads ~/.zshrc / ~/.bash_profile and sets $PATH
     const args = process.platform === 'win32' ? [] : ['-l'];
 
+    // Shell integration: inject precmd/preexec hooks via ZDOTDIR (zsh) or --rcfile (bash)
+    // In packaged app, asarUnpack extracts files to app.asar.unpacked/
+    const shellIntegrationDir = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'), 'shell-integration');
+    const shellName = path.basename(shell);
+    const extraEnv = {};
+
+    if (shellName === 'zsh' && process.platform !== 'win32') {
+        // ZDOTDIR trick: redirect zsh init to our .zshrc which loads user config + hooks
+        extraEnv.__COMPASSAI_USER_ZDOTDIR = process.env.ZDOTDIR || os.homedir();
+        extraEnv.__COMPASSAI_SHELL_DIR = shellIntegrationDir;
+        extraEnv.ZDOTDIR = shellIntegrationDir;
+    } else if (shellName === 'bash' && process.platform !== 'win32') {
+        // For bash, use --rcfile to load our integration script
+        const rcFile = path.join(shellIntegrationDir, 'shellIntegration-rc.bash');
+        args.length = 0; // replace ['-l']
+        args.push('--rcfile', rcFile);
+    }
+
     // Spawn with sensible defaults
     const ptyProcess = pty.spawn(shell, args, {
         name: 'xterm-256color',
@@ -55,7 +74,8 @@ function startTerminal(cwd, command, onData, onExit) {
         env: {
             ...process.env,
             TERM: 'xterm-256color',
-            COLORTERM: 'truecolor'
+            COLORTERM: 'truecolor',
+            ...extraEnv
         }
     });
 

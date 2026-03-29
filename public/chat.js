@@ -93,6 +93,7 @@ class TerminalController {
             const pane = this.panes.get(id);
             if (!pane) return;
             pane._writeBuf = (pane._writeBuf || '') + data;
+            pane._recentOutput = ((pane._recentOutput || '') + data).slice(-2000);
             // Debounce: reiniciamos el timer con cada chunk nuevo para acumular
             // todo un ciclo de actualización de Gemini (cursor move + clear + redraw + status bar)
             // antes de escribir. El wrap con ESC[?2026h/l hace el render atómico en xterm.js v6.
@@ -103,6 +104,54 @@ class TerminalController {
                 pane._writeTimer = null;
                 pane.term.write('\x1b[?2026h' + buf + '\x1b[?2026l');
             }, 16);
+
+            // Detección de caída de output: para procesos interactivos (Claude, etc.)
+            // Status bar updates: 58-103 bytes. Respuesta real: >200 bytes.
+            const significantOutput = data.length > 200;
+            if (significantOutput) {
+                const now = Date.now();
+                if (!pane._activityStart) pane._activityStart = now;
+                pane._lastSignificantOutput = now;
+                pane._activityNotified = false;
+
+                // Indicador visual de actividad en la pestaña
+                const tab = this.tabs.get(pane.tabId);
+                const cmd = (pane.shellState?.currentCommand || '').trim().toLowerCase();
+                const isClaudeCmd = /^(claude|claude\s)/.test(cmd);
+                pane._isClaudeCmd = isClaudeCmd;
+                const thinkingClass = isClaudeCmd ? 'claude-thinking' : 'terminal-busy';
+                if (tab) {
+                    tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
+                    tab.tabBtn.classList.add(thinkingClass);
+                }
+
+                // Timer: si no hay output significativo en 8s, la respuesta terminó
+                if (pane._silenceTimer) clearTimeout(pane._silenceTimer);
+                pane._silenceTimer = setTimeout(() => {
+                    const activityDuration = (pane._lastSignificantOutput || now) - pane._activityStart;
+                    if (pane._activityNotified) return;
+                    pane._activityStart = null;
+                    pane._silenceTimer = null;
+                    pane._activityNotified = true;
+
+                    // Actualizar indicador visual
+                    if (tab) {
+                        tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
+                        if (pane._isClaudeCmd && this._needsUserAction(pane._recentOutput || '')) {
+                            tab.tabBtn.classList.add('claude-waiting');
+                        }
+                    }
+
+                    // Solo notificar si hubo actividad significativa >= 5s
+                    if (activityDuration >= 5000) {
+                        this._onCommandFinished(id, {
+                            command: pane.shellState?.currentCommand || 'Respuesta completada',
+                            exitCode: 0,
+                            duration: activityDuration
+                        });
+                    }
+                }, 8000);
+            }
         });
 
         this.ipcRenderer.on('terminal-exit', (event, { id }) => {
@@ -481,10 +530,62 @@ class TerminalController {
             }
         });
 
+        // Shell Integration: parsear OSC 633 para tracking de comandos
+        const shellState = {
+            commandStartTime: null,
+            currentCommand: null,
+            commandRunning: false,
+        };
+        term.parser.registerOscHandler(633, (data) => {
+            const parts = data.split(';');
+            const type = parts[0];
+            switch (type) {
+                case 'A': // Prompt start
+                    break;
+                case 'C': { // Command executed (preexec)
+                    shellState.commandRunning = true;
+                    shellState.commandStartTime = Date.now();
+                    // Mostrar spinner en la pestaña
+                    const pC = this.panes.get(ptyId);
+                    const tC = this.tabs.get(pC?.tabId);
+                    if (tC) {
+                        tC.tabBtn.classList.remove('claude-thinking', 'terminal-busy');
+                        tC.tabBtn.classList.add('terminal-busy');
+                    }
+                    break;
+                }
+                case 'D': { // Command finished (precmd) — D;exitCode
+                    if (!shellState.commandRunning) break;
+                    const exitCode = parseInt(parts[1] || '0', 10);
+                    const duration = Date.now() - (shellState.commandStartTime || Date.now());
+                    // Cancelar timer de silencio para evitar doble notificación
+                    const p = this.panes.get(ptyId);
+                    if (p?._silenceTimer) { clearTimeout(p._silenceTimer); p._silenceTimer = null; }
+                    p._activityStart = null;
+                    // Quitar indicador visual de la pestaña
+                    const t = this.tabs.get(p?.tabId);
+                    if (t) t.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
+                    this._onCommandFinished(ptyId, {
+                        command: shellState.currentCommand,
+                        exitCode,
+                        duration
+                    });
+                    shellState.commandRunning = false;
+                    shellState.currentCommand = null;
+                    shellState.commandStartTime = null;
+                    break;
+                }
+                case 'E': // Command text — E;command
+                    shellState.currentCommand = parts.slice(1).join(';');
+                    break;
+            }
+            return true; // handled, don't render
+        });
+
         term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
-            _writeBuf: '', _writeTimer: null });
+            _writeBuf: '', _writeTimer: null, shellState });
 
         // Activar pane al hacer click en él
         el.addEventListener('mousedown', () => this._setActiveLeaf(tabId, ptyId));
@@ -766,6 +867,40 @@ class TerminalController {
         // Notificar a app.js para la vinculación bidireccional con archivos
         if (!this._skipNotify && tab.linkedFileId && typeof this.onTerminalActivated === 'function') {
             this.onTerminalActivated(tab.linkedFileId);
+        }
+    }
+
+    // ── Detectar si Claude necesita acción del usuario ─────────────────────────
+    _needsUserAction(rawOutput) {
+        const clean = rawOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                               .replace(/\x1b\][^\x07]*\x07/g, '')
+                               .replace(/\x1b\].*?\x1b\\/g, '');
+        return /Do you want to proceed|Enter to select|Esc to cancel/i.test(clean);
+    }
+
+    // ── Notificación cuando un comando largo termina ──────────────────────────
+    _onCommandFinished(ptyId, info) {
+        const THRESHOLD_MS = 15000; // 15 segundos
+        if (!info || info.duration < THRESHOLD_MS) return;
+
+        // Solo notificar si el terminal no tiene el foco
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+        const termHasFocus = pane.term.textarea === document.activeElement;
+        if (document.hasFocus() && termHasFocus) return;
+
+        // Info del pane y tab
+        const paneName = pane.leafNode?.el?.querySelector('.pane-title')?.textContent || 'Terminal';
+        const cmdText = info.command || 'Comando';
+        const seconds = (info.duration / 1000).toFixed(0);
+        const status = info.exitCode === 0 ? '✓ Completado' : `✗ Error (código ${info.exitCode})`;
+
+        const notifData = {
+            title: `${paneName} — ${status}`,
+            body: `$ ${cmdText}  ·  ${seconds}s`
+        };
+        if (this.ipcRenderer) {
+            this.ipcRenderer.send('terminal-notify', notifData);
         }
     }
 

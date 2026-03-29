@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./server.js');
@@ -500,6 +500,22 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
         }
         req.end();
     });
+});
+
+// === TERMINAL NOTIFICATIONS ===
+ipcMain.on('terminal-notify', (event, { title, body }) => {
+    if (Notification.isSupported()) {
+        const n = new Notification({ title, body });
+        n.on('click', () => {
+            // Al hacer click en la notificación, enfocar la ventana
+            const win = BrowserWindow.fromWebContents(event.sender);
+            if (win) {
+                win.show();
+                win.focus();
+            }
+        });
+        n.show();
+    }
 });
 
 // === PROTOTYPE SERVER (servir carpetas como servidor estático) ===
