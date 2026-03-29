@@ -5,3 +5,5 @@ dist/
 build/
 .env
 electron-builder.test.config.js
+shell-integration/.zsh*
+shell-integration/.zsh_sessions/
