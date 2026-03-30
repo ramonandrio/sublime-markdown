@@ -26,19 +26,132 @@ function loadTerminalLibs() {
     return false;
 }
 
-// Tema de color compartido por todos los terminales
-const TERM_THEME = {
-    background: '#FAFAFA',
-    foreground: '#5C6166',
-    cursor: '#F29718',
-    cursorAccent: '#FAFAFA',
-    selectionBackground: 'rgba(54, 163, 217, 0.2)',
-    black:   '#5C6166', red:     '#F07178', green:   '#86B300', yellow:  '#F29718',
-    blue:    '#36A3D9', magenta: '#A37ACC', cyan:    '#4CBF99', white:   '#8A9199',
-    brightBlack: '#ADB1B8', brightRed:     '#F07178', brightGreen:   '#86B300',
-    brightYellow: '#F29718', brightBlue:   '#36A3D9', brightMagenta: '#A37ACC',
-    brightCyan:   '#4CBF99', brightWhite:  '#D5D8DA'
+// Temas de terminal por pane (inspirados en macOS Terminal.app)
+const PANE_THEMES = {
+    'Basic': {
+        background: '#FAFAFA', foreground: '#5C6166', cursor: '#F29718', cursorAccent: '#FAFAFA',
+        selectionBackground: 'rgba(54, 163, 217, 0.2)',
+        black: '#5C6166', red: '#F07178', green: '#86B300', yellow: '#F29718',
+        blue: '#36A3D9', magenta: '#A37ACC', cyan: '#4CBF99', white: '#8A9199',
+        brightBlack: '#ADB1B8', brightRed: '#F07178', brightGreen: '#86B300',
+        brightYellow: '#F29718', brightBlue: '#36A3D9', brightMagenta: '#A37ACC',
+        brightCyan: '#4CBF99', brightWhite: '#D5D8DA',
+        _meta: { dark: false, headerBg: '#f0f0f0', headerFg: '#888', headerBorder: '#e0e0e0', dot: '#FAFAFA' }
+    },
+    'Pro': {
+        background: '#1A1A1A', foreground: '#F2F2F2', cursor: '#4DD2FF', cursorAccent: '#1A1A1A',
+        selectionBackground: 'rgba(77, 210, 255, 0.25)',
+        black: '#000000', red: '#FF6B6B', green: '#69FF94', yellow: '#FFEE54',
+        blue: '#6CB6FF', magenta: '#D2A8FF', cyan: '#76E3EA', white: '#C7C7C7',
+        brightBlack: '#686868', brightRed: '#FF6B6B', brightGreen: '#69FF94',
+        brightYellow: '#FFEE54', brightBlue: '#6CB6FF', brightMagenta: '#D2A8FF',
+        brightCyan: '#76E3EA', brightWhite: '#FFFFFF',
+        _meta: { dark: true, headerBg: '#111111', headerFg: '#999', headerBorder: '#333', dot: '#1A1A1A' }
+    },
+    'Ocean': {
+        background: '#1B2B34', foreground: '#CDD3DE', cursor: '#6699CC', cursorAccent: '#1B2B34',
+        selectionBackground: 'rgba(102, 153, 204, 0.25)',
+        black: '#1B2B34', red: '#EC5F67', green: '#99C794', yellow: '#FAC863',
+        blue: '#6699CC', magenta: '#C594C5', cyan: '#5FB3B3', white: '#CDD3DE',
+        brightBlack: '#65737E', brightRed: '#EC5F67', brightGreen: '#99C794',
+        brightYellow: '#FAC863', brightBlue: '#6699CC', brightMagenta: '#C594C5',
+        brightCyan: '#5FB3B3', brightWhite: '#D8DEE9',
+        _meta: { dark: true, headerBg: '#152028', headerFg: '#65737E', headerBorder: '#2B3F4B', dot: '#1B2B34' }
+    },
+    'Grass': {
+        background: '#13381E', foreground: '#D0E8C8', cursor: '#73C936', cursorAccent: '#13381E',
+        selectionBackground: 'rgba(115, 201, 54, 0.2)',
+        black: '#0A2414', red: '#E55A5A', green: '#73C936', yellow: '#C6C43F',
+        blue: '#5DABCF', magenta: '#B771DC', cyan: '#5FD79D', white: '#D0E8C8',
+        brightBlack: '#4A7A5B', brightRed: '#E55A5A', brightGreen: '#73C936',
+        brightYellow: '#C6C43F', brightBlue: '#5DABCF', brightMagenta: '#B771DC',
+        brightCyan: '#5FD79D', brightWhite: '#E8F5E2',
+        _meta: { dark: true, headerBg: '#0D2A16', headerFg: '#5A8A6A', headerBorder: '#1A4A2A', dot: '#13381E' }
+    },
+    'Homebrew': {
+        background: '#0A0A0A', foreground: '#00FF00', cursor: '#00FF00', cursorAccent: '#0A0A0A',
+        selectionBackground: 'rgba(0, 255, 0, 0.15)',
+        black: '#0A0A0A', red: '#FF0000', green: '#00FF00', yellow: '#FFFF00',
+        blue: '#0066FF', magenta: '#FF00FF', cyan: '#00FFFF', white: '#CCCCCC',
+        brightBlack: '#555555', brightRed: '#FF0000', brightGreen: '#00FF00',
+        brightYellow: '#FFFF00', brightBlue: '#0066FF', brightMagenta: '#FF00FF',
+        brightCyan: '#00FFFF', brightWhite: '#FFFFFF',
+        _meta: { dark: true, headerBg: '#050505', headerFg: '#00AA00', headerBorder: '#1A3A1A', dot: '#0A0A0A' }
+    },
+    'Man Page': {
+        background: '#FEF49C', foreground: '#000000', cursor: '#7F7F7F', cursorAccent: '#FEF49C',
+        selectionBackground: 'rgba(0, 0, 0, 0.15)',
+        black: '#000000', red: '#CC0000', green: '#00A600', yellow: '#999900',
+        blue: '#0000B2', magenta: '#B200B2', cyan: '#00A6B2', white: '#CCCCCC',
+        brightBlack: '#666666', brightRed: '#E50000', brightGreen: '#00D900',
+        brightYellow: '#E5E500', brightBlue: '#0000FF', brightMagenta: '#E500E5',
+        brightCyan: '#00E5E5', brightWhite: '#E5E5E5',
+        _meta: { dark: false, headerBg: '#F0E88C', headerFg: '#666600', headerBorder: '#D4CC6A', dot: '#FEF49C' }
+    },
+    'Novel': {
+        background: '#DFDBC3', foreground: '#3B2322', cursor: '#3B2322', cursorAccent: '#DFDBC3',
+        selectionBackground: 'rgba(59, 35, 34, 0.15)',
+        black: '#3B2322', red: '#CC0000', green: '#00A600', yellow: '#999900',
+        blue: '#0000B2', magenta: '#B200B2', cyan: '#00A6B2', white: '#CCCCCC',
+        brightBlack: '#666666', brightRed: '#E50000', brightGreen: '#00D900',
+        brightYellow: '#E5E500', brightBlue: '#0000FF', brightMagenta: '#E500E5',
+        brightCyan: '#00E5E5', brightWhite: '#E5E5E5',
+        _meta: { dark: false, headerBg: '#D0CCA8', headerFg: '#6B5B4B', headerBorder: '#BBB48E', dot: '#DFDBC3' }
+    },
+    'Red Sands': {
+        background: '#7A2D21', foreground: '#D7C9A7', cursor: '#D7C9A7', cursorAccent: '#7A2D21',
+        selectionBackground: 'rgba(215, 201, 167, 0.2)',
+        black: '#000000', red: '#FF6640', green: '#00CC00', yellow: '#FFCC00',
+        blue: '#0099CC', magenta: '#CC00FF', cyan: '#00CCCC', white: '#D7C9A7',
+        brightBlack: '#555555', brightRed: '#FF6640', brightGreen: '#00CC00',
+        brightYellow: '#FFCC00', brightBlue: '#0099CC', brightMagenta: '#CC00FF',
+        brightCyan: '#00CCCC', brightWhite: '#FFFFFF',
+        _meta: { dark: true, headerBg: '#5E2219', headerFg: '#BDA888', headerBorder: '#4A1A12', dot: '#7A2D21' }
+    },
+    'Silver Aerogel': {
+        background: '#929292', foreground: '#000000', cursor: '#000000', cursorAccent: '#929292',
+        selectionBackground: 'rgba(0, 0, 0, 0.2)',
+        black: '#000000', red: '#BB0000', green: '#00BB00', yellow: '#BBBB00',
+        blue: '#0000BB', magenta: '#BB00BB', cyan: '#00BBBB', white: '#BBBBBB',
+        brightBlack: '#555555', brightRed: '#FF5555', brightGreen: '#55FF55',
+        brightYellow: '#FFFF55', brightBlue: '#5555FF', brightMagenta: '#FF55FF',
+        brightCyan: '#55FFFF', brightWhite: '#FFFFFF',
+        _meta: { dark: false, headerBg: '#858585', headerFg: '#333', headerBorder: '#7A7A7A', dot: '#929292' }
+    },
+    'Solid Colors': {
+        background: '#000000', foreground: '#FFFFFF', cursor: '#FFFFFF', cursorAccent: '#000000',
+        selectionBackground: 'rgba(255, 255, 255, 0.2)',
+        black: '#000000', red: '#FF0000', green: '#00FF00', yellow: '#FFFF00',
+        blue: '#0000FF', magenta: '#FF00FF', cyan: '#00FFFF', white: '#FFFFFF',
+        brightBlack: '#808080', brightRed: '#FF0000', brightGreen: '#00FF00',
+        brightYellow: '#FFFF00', brightBlue: '#0000FF', brightMagenta: '#FF00FF',
+        brightCyan: '#00FFFF', brightWhite: '#FFFFFF',
+        _meta: { dark: true, headerBg: '#000000', headerFg: '#808080', headerBorder: '#333', dot: '#000000' }
+    },
+    'Clear Dark': {
+        background: '#262626', foreground: '#E0E0E0', cursor: '#BBBBBB', cursorAccent: '#262626',
+        selectionBackground: 'rgba(187, 187, 187, 0.2)',
+        black: '#000000', red: '#E06C75', green: '#98C379', yellow: '#E5C07B',
+        blue: '#61AFEF', magenta: '#C678DD', cyan: '#56B6C2', white: '#ABB2BF',
+        brightBlack: '#5C6370', brightRed: '#E06C75', brightGreen: '#98C379',
+        brightYellow: '#E5C07B', brightBlue: '#61AFEF', brightMagenta: '#C678DD',
+        brightCyan: '#56B6C2', brightWhite: '#FFFFFF',
+        _meta: { dark: true, headerBg: '#1C1C1C', headerFg: '#888', headerBorder: '#383838', dot: '#262626' }
+    },
+    'Clear Light': {
+        background: '#FFFFFF', foreground: '#383A42', cursor: '#526FFF', cursorAccent: '#FFFFFF',
+        selectionBackground: 'rgba(82, 111, 255, 0.15)',
+        black: '#383A42', red: '#E45649', green: '#50A14F', yellow: '#C18401',
+        blue: '#4078F2', magenta: '#A626A4', cyan: '#0184BC', white: '#A0A1A7',
+        brightBlack: '#4F525E', brightRed: '#E45649', brightGreen: '#50A14F',
+        brightYellow: '#C18401', brightBlue: '#4078F2', brightMagenta: '#A626A4',
+        brightCyan: '#0184BC', brightWhite: '#FAFAFA',
+        _meta: { dark: false, headerBg: '#F0F0F0', headerFg: '#888', headerBorder: '#E0E0E0', dot: '#FFFFFF' }
+    }
 };
+
+// Tema default (sin _meta para xterm)
+const TERM_THEME = (() => { const t = Object.assign({}, PANE_THEMES['Basic']); delete t._meta; return t; })();
 
 // =============================================================================
 // TerminalController
@@ -319,6 +432,15 @@ class TerminalController {
         header.innerHTML = `
             <span class="pane-title">${options.fileName || 'Terminal'}</span>
             <div class="pane-header-actions">
+                <div class="pane-theme-picker">
+                    <button class="pane-btn pane-theme-btn" title="Tema del pane">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3">
+                            <circle cx="5.5" cy="5.5" r="4.5"/>
+                            <circle cx="5.5" cy="5.5" r="2" fill="currentColor"/>
+                        </svg>
+                    </button>
+                    <div class="pane-theme-dropdown"></div>
+                </div>
                 <button class="pane-btn pane-split-h-btn" title="Dividir horizontalmente — arriba/abajo (Ctrl+Shift+D)">
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
                         <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
@@ -585,7 +707,7 @@ class TerminalController {
         term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
-            _writeBuf: '', _writeTimer: null, shellState });
+            _writeBuf: '', _writeTimer: null, shellState, themeName: 'Basic' });
 
         // Activar pane al hacer click en él
         el.addEventListener('mousedown', () => this._setActiveLeaf(tabId, ptyId));
@@ -610,6 +732,73 @@ class TerminalController {
             e.stopPropagation();
             this.closePane(ptyId);
         });
+
+        // Selector de tema por pane
+        const themePicker = header.querySelector('.pane-theme-picker');
+        const themeBtn = header.querySelector('.pane-theme-btn');
+        const themeDropdown = header.querySelector('.pane-theme-dropdown');
+
+        // Construir items del dropdown
+        for (const name of Object.keys(PANE_THEMES)) {
+            const item = document.createElement('button');
+            item.className = 'pane-theme-item' + (name === 'Basic' ? ' active' : '');
+            item.dataset.theme = name;
+            const dot = document.createElement('span');
+            dot.className = 'pane-theme-dot';
+            dot.style.background = PANE_THEMES[name].background;
+            const isDark = PANE_THEMES[name]._meta.dark;
+            dot.style.border = `1px solid ${isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)'}`;
+            item.appendChild(dot);
+            item.appendChild(document.createTextNode(name));
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._applyPaneTheme(ptyId, name);
+                themeDropdown.classList.remove('open');
+            });
+            themeDropdown.appendChild(item);
+        }
+
+        themeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Cerrar cualquier otro dropdown abierto
+            document.querySelectorAll('.pane-theme-dropdown.open').forEach(d => {
+                if (d !== themeDropdown) d.classList.remove('open');
+            });
+            const isOpen = themeDropdown.classList.toggle('open');
+            if (isOpen) {
+                // Posicionar con fixed para escapar overflow:hidden de los padres
+                const btnRect = themeBtn.getBoundingClientRect();
+                const ddHeight = themeDropdown.scrollHeight;
+                const ddWidth = themeDropdown.offsetWidth || 160;
+                // Preferir abrir hacia abajo; si no cabe, abrir hacia arriba
+                let top = btnRect.bottom + 2;
+                if (top + ddHeight > window.innerHeight - 8) {
+                    top = btnRect.top - ddHeight - 2;
+                    if (top < 8) top = 8; // fallback: pegar arriba
+                }
+                // Alinear a la derecha del botón para no salirse por la derecha
+                let left = btnRect.right - ddWidth;
+                if (left < 8) left = 8;
+                themeDropdown.style.top = top + 'px';
+                themeDropdown.style.left = left + 'px';
+                // Limitar altura al espacio disponible
+                const maxH = Math.min(ddHeight, window.innerHeight - top - 8);
+                themeDropdown.style.maxHeight = maxH + 'px';
+            }
+        });
+
+        // Cerrar dropdown al hacer click fuera, scroll o resize
+        const closeDropdown = (e) => {
+            if (!themePicker.contains(e.target)) themeDropdown.classList.remove('open');
+        };
+        const closeDropdownAlways = () => themeDropdown.classList.remove('open');
+        document.addEventListener('click', closeDropdown);
+        window.addEventListener('resize', closeDropdownAlways);
+        // Limpiar listeners cuando se destruya el pane
+        el._themeCleanup = () => {
+            document.removeEventListener('click', closeDropdown);
+            window.removeEventListener('resize', closeDropdownAlways);
+        };
 
         // ── Drag-and-drop: desde sidebar (text/plain) o desde el Finder/OS (Files) ──
         el.addEventListener('dragover', (e) => {
@@ -694,6 +883,58 @@ class TerminalController {
         this._sendPathToPane(activeId, ...filePaths);
     }
 
+    // ── Aplicar tema a un pane individual ────────────────────────────────────
+    _applyPaneTheme(ptyId, themeName) {
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+        const theme = PANE_THEMES[themeName];
+        if (!theme) return;
+
+        pane.themeName = themeName;
+        const { term, leafNode } = pane;
+        const meta = theme._meta;
+        const bg = theme.background;
+
+        // Actualizar tema de xterm (excluir _meta)
+        const xtermTheme = Object.assign({}, theme);
+        delete xtermTheme._meta;
+        term.options.theme = xtermTheme;
+
+        // Actualizar backgrounds del pane vía inline style
+        const el = leafNode.el;
+        el.style.background = bg;
+        const termEl = leafNode.termEl;
+        termEl.style.background = bg;
+
+        // xterm viewport y screen
+        const viewport = termEl.querySelector('.xterm-viewport');
+        const screen = termEl.querySelector('.xterm-screen');
+        if (viewport) viewport.style.setProperty('background-color', bg, 'important');
+        if (screen) screen.style.setProperty('background-color', bg, 'important');
+
+        // Adaptar cabecera al tema
+        const header = el.querySelector('.pane-header');
+        if (header) {
+            header.style.background = meta.headerBg;
+            header.style.borderBottomColor = meta.headerBorder;
+        }
+        const title = el.querySelector('.pane-title');
+        if (title) title.style.color = meta.headerFg;
+
+        // Adaptar botones del header
+        el.querySelectorAll('.pane-btn').forEach(btn => {
+            btn.style.color = meta.headerFg;
+        });
+
+        // Marcar item activo en el dropdown
+        el.querySelectorAll('.pane-theme-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.theme === themeName);
+        });
+
+        // Forzar refresh del WebGL renderer si está activo
+        try { term.refresh(0, term.rows - 1); } catch (_) {}
+    }
+
     // ── Dividir un pane ───────────────────────────────────────────────────────
     async splitPane(ptyId, dir) {
         if (!this.ipcRenderer) return;
@@ -769,6 +1010,8 @@ class TerminalController {
 
         this.ipcRenderer?.send('terminal-kill', { id: ptyId });
         pane.term.dispose();
+        // Limpiar listener del theme dropdown
+        if (pane.leafNode.el._themeCleanup) pane.leafNode.el._themeCleanup();
         this.panes.delete(ptyId);
 
         const leafNode    = pane.leafNode;
