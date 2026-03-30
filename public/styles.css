@@ -1975,6 +1975,55 @@ body {
     flex-shrink: 0;
 }
 
+/* Selector de perfil para split */
+.pane-split-picker {
+    position: relative;
+}
+
+.pane-profile-dropdown {
+    display: none;
+    position: fixed;
+    z-index: 10000;
+    min-width: 130px;
+    overflow-y: auto;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    padding: 4px 0;
+}
+
+.pane-profile-dropdown.open {
+    display: block;
+}
+
+.pane-profile-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 5px 10px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--text-secondary, #555);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.pane-profile-item:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.05));
+}
+
+.pane-profile-icon {
+    width: 14px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 10px;
+}
+
 /* Área del terminal xterm dentro del pane */
 .pane-terminal {
     flex: 1;

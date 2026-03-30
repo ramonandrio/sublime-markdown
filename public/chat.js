@@ -26,6 +26,14 @@ function loadTerminalLibs() {
     return false;
 }
 
+// Perfiles de arranque para terminales
+const PANE_PROFILES = [
+    { id: 'terminal', label: 'Terminal',  icon: '>', command: null },
+    { id: 'claude',   label: 'Claude',    icon: '✦', command: '$HOME/.local/bin/claude --dangerously-skip-permissions' },
+    { id: 'gemini',   label: 'Gemini',    icon: '◆', command: 'gemini' },
+    { id: 'openai',   label: 'ChatGPT',   icon: '●', command: 'chatgpt' },
+];
+
 // Temas de terminal por pane (inspirados en macOS Terminal.app)
 const PANE_THEMES = {
     'Basic': {
@@ -414,6 +422,8 @@ class TerminalController {
         requestAnimationFrame(() => requestAnimationFrame(() => {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
+            // Ejecutar comando del perfil si se especificó
+            if (options.profile) this._execProfile(ptyRes.id, options.profile);
         }));
     }
 
@@ -441,18 +451,24 @@ class TerminalController {
                     </button>
                     <div class="pane-theme-dropdown"></div>
                 </div>
-                <button class="pane-btn pane-split-h-btn" title="Dividir horizontalmente — arriba/abajo (Ctrl+Shift+D)">
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
-                        <line x1="0.5" y1="5.5" x2="10.5" y2="5.5"/>
-                    </svg>
-                </button>
-                <button class="pane-btn pane-split-v-btn" title="Dividir verticalmente — lado a lado (Ctrl+Shift+E)">
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
-                        <line x1="5.5" y1="0.5" x2="5.5" y2="10.5"/>
-                    </svg>
-                </button>
+                <div class="pane-split-picker" data-dir="h">
+                    <button class="pane-btn pane-split-h-btn" title="Dividir horizontalmente — arriba/abajo (Ctrl+Shift+D)">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
+                            <line x1="0.5" y1="5.5" x2="10.5" y2="5.5"/>
+                        </svg>
+                    </button>
+                    <div class="pane-profile-dropdown"></div>
+                </div>
+                <div class="pane-split-picker" data-dir="v">
+                    <button class="pane-btn pane-split-v-btn" title="Dividir verticalmente — lado a lado (Ctrl+Shift+E)">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="0.5" y="0.5" width="10" height="10" rx="1.5"/>
+                            <line x1="5.5" y1="0.5" x2="5.5" y2="10.5"/>
+                        </svg>
+                    </button>
+                    <div class="pane-profile-dropdown"></div>
+                </div>
                 <button class="pane-btn pane-close-btn" title="Cerrar pane (Ctrl+Shift+W)">×</button>
             </div>`;
 
@@ -719,14 +735,51 @@ class TerminalController {
             this._renamePaneTitle(titleEl);
         });
 
-        // Botones de split y cierre
-        header.querySelector('.pane-split-h-btn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.splitPane(ptyId, 'h');
-        });
-        header.querySelector('.pane-split-v-btn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.splitPane(ptyId, 'v');
+        // Botones de split con selector de perfil
+        header.querySelectorAll('.pane-split-picker').forEach(picker => {
+            const dir = picker.dataset.dir;
+            const btn = picker.querySelector('.pane-btn');
+            const dropdown = picker.querySelector('.pane-profile-dropdown');
+
+            // Construir items del dropdown de perfiles
+            for (const profile of PANE_PROFILES) {
+                const item = document.createElement('button');
+                item.className = 'pane-profile-item';
+                item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    dropdown.classList.remove('open');
+                    this.splitPane(ptyId, dir, { profile: profile.id });
+                });
+                dropdown.appendChild(item);
+            }
+
+            // Click: split directo con terminal. Hold/right-click: mostrar perfiles
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.splitPane(ptyId, dir);
+            });
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Cerrar otros dropdowns
+                document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
+                    if (d !== dropdown) d.classList.remove('open');
+                });
+                const isOpen = dropdown.classList.toggle('open');
+                if (isOpen) {
+                    const btnRect = btn.getBoundingClientRect();
+                    const ddHeight = dropdown.scrollHeight;
+                    const ddWidth = dropdown.offsetWidth || 140;
+                    let top = btnRect.bottom + 2;
+                    if (top + ddHeight > window.innerHeight - 8) top = btnRect.top - ddHeight - 2;
+                    if (top < 8) top = 8;
+                    let left = btnRect.right - ddWidth;
+                    if (left < 8) left = 8;
+                    dropdown.style.top = top + 'px';
+                    dropdown.style.left = left + 'px';
+                }
+            });
         });
         header.querySelector('.pane-close-btn').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -787,11 +840,18 @@ class TerminalController {
             }
         });
 
-        // Cerrar dropdown al hacer click fuera, scroll o resize
+        // Cerrar dropdowns al hacer click fuera, scroll o resize
         const closeDropdown = (e) => {
             if (!themePicker.contains(e.target)) themeDropdown.classList.remove('open');
+            // Cerrar profile dropdowns si click fuera
+            el.querySelectorAll('.pane-split-picker').forEach(picker => {
+                if (!picker.contains(e.target)) picker.querySelector('.pane-profile-dropdown')?.classList.remove('open');
+            });
         };
-        const closeDropdownAlways = () => themeDropdown.classList.remove('open');
+        const closeDropdownAlways = () => {
+            themeDropdown.classList.remove('open');
+            el.querySelectorAll('.pane-profile-dropdown.open').forEach(d => d.classList.remove('open'));
+        };
         document.addEventListener('click', closeDropdown);
         window.addEventListener('resize', closeDropdownAlways);
         // Limpiar listeners cuando se destruya el pane
@@ -935,8 +995,25 @@ class TerminalController {
         try { term.refresh(0, term.rows - 1); } catch (_) {}
     }
 
+    // ── Ejecutar comando de perfil en un pane ──────────────────────────────
+    _execProfile(ptyId, profileId) {
+        if (!profileId || profileId === 'terminal') return;
+        const profile = PANE_PROFILES.find(p => p.id === profileId);
+        if (!profile?.command) return;
+        // Pequeño delay para que el shell esté listo
+        setTimeout(() => {
+            this.ipcRenderer?.send('terminal-input', { id: ptyId, input: profile.command + '\n' });
+        }, 300);
+        // Actualizar título del pane
+        const pane = this.panes.get(ptyId);
+        if (pane) {
+            const title = pane.leafNode.el.querySelector('.pane-title');
+            if (title) title.textContent = profile.label;
+        }
+    }
+
     // ── Dividir un pane ───────────────────────────────────────────────────────
-    async splitPane(ptyId, dir) {
+    async splitPane(ptyId, dir, options = {}) {
         if (!this.ipcRenderer) return;
         const pane = this.panes.get(ptyId);
         if (!pane) return;
@@ -1000,6 +1077,8 @@ class TerminalController {
             this._fitLeaf(newLeaf);
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
+            // Ejecutar comando del perfil si se especificó
+            if (options.profile) this._execProfile(ptyRes.id, options.profile);
         }));
     }
 
