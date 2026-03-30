@@ -173,8 +173,9 @@ class TerminalController {
         this.activeTabId = null;
         this._skipNotify = false;
 
-        this.ipcRenderer = (typeof window.require !== 'undefined')
-            ? window.require('electron').ipcRenderer : null;
+        const electron = (typeof window.require !== 'undefined') ? window.require('electron') : {};
+        this.ipcRenderer = electron.ipcRenderer || null;
+        this.webUtils = electron.webUtils || null;
 
         // Callback para comunicación bidireccional con app.js
         this.onTerminalActivated = null;
@@ -185,8 +186,47 @@ class TerminalController {
             this.tabsContainer  = document.getElementById('terminalTabsContainer');
             this.bodyContainer  = document.getElementById('terminalBodyContainer');
 
-            document.getElementById('newTerminalBtn')
-                ?.addEventListener('click', () => this.createTab());
+            // Botón "+" nueva tab: click = terminal, right-click = elegir perfil
+            const newTabBtn = document.getElementById('newTerminalBtn');
+            const newTabDropdown = document.getElementById('newTabProfileDropdown');
+            if (newTabBtn && newTabDropdown) {
+                for (const profile of PANE_PROFILES) {
+                    const item = document.createElement('button');
+                    item.className = 'pane-profile-item';
+                    item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
+                    item.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        newTabDropdown.classList.remove('open');
+                        this.createTab({ profile: profile.id });
+                    });
+                    newTabDropdown.appendChild(item);
+                }
+                newTabBtn.addEventListener('click', () => this.createTab());
+                newTabBtn.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
+                        if (d !== newTabDropdown) d.classList.remove('open');
+                    });
+                    const isOpen = newTabDropdown.classList.toggle('open');
+                    if (isOpen) {
+                        const btnRect = newTabBtn.getBoundingClientRect();
+                        const ddHeight = newTabDropdown.scrollHeight;
+                        const ddWidth = newTabDropdown.offsetWidth || 140;
+                        let top = btnRect.bottom + 2;
+                        if (top + ddHeight > window.innerHeight - 8) top = btnRect.top - ddHeight - 2;
+                        if (top < 8) top = 8;
+                        let left = btnRect.right - ddWidth;
+                        if (left < 8) left = 8;
+                        newTabDropdown.style.top = top + 'px';
+                        newTabDropdown.style.left = left + 'px';
+                    }
+                });
+                // Cerrar al click fuera
+                document.addEventListener('click', (e) => {
+                    if (!newTabBtn.parentElement.contains(e.target)) newTabDropdown.classList.remove('open');
+                });
+            }
             document.getElementById('closeTerminalPanelBtn')
                 ?.addEventListener('click', () => this.closeAll());
 
@@ -302,7 +342,7 @@ class TerminalController {
     // durante un resize, el iframe captura los eventos del ratón y el drag se pierde.
     _blockEmbeds(block) {
         const style = block ? 'none' : '';
-        document.querySelectorAll('iframe, webview').forEach(el => {
+        document.querySelectorAll('iframe, webview, .xterm').forEach(el => {
             el.style.pointerEvents = style;
         });
     }
@@ -889,8 +929,10 @@ class TerminalController {
             el.classList.remove('pane-drop-target');
 
             // 1. File.path — propiedad de Electron en objetos File del SO
-            if (e.dataTransfer.files?.length > 0) {
-                const paths = Array.from(e.dataTransfer.files).map(f => f.path).filter(Boolean);
+            if (e.dataTransfer.files?.length > 0 && this.webUtils) {
+                const paths = Array.from(e.dataTransfer.files)
+                    .map(f => this.webUtils.getPathForFile(f))
+                    .filter(Boolean);
                 if (paths.length > 0) { this._sendPathToPane(ptyId, ...paths); return; }
             }
 
@@ -1247,25 +1289,21 @@ class TerminalController {
             // 'h' = split horizontal = línea horizontal = paneles arriba/abajo → arrastrar en Y
             // 'v' = split vertical   = línea vertical   = paneles lado a lado  → arrastrar en X
             const isH       = splitNode.dir === 'h';
-            const totalSize = isH ? splitNode.el.offsetHeight : splitNode.el.offsetWidth;
+            const rect      = splitNode.el.getBoundingClientRect();
+            const resizerPx = isH ? splitNode.resizerEl.offsetHeight : splitNode.resizerEl.offsetWidth;
+            const usable    = (isH ? rect.height : rect.width) - resizerPx;
 
             splitNode.resizerEl.classList.add('is-resizing');
             document.body.style.cursor = isH ? 'row-resize' : 'col-resize';
             this._blockEmbeds(true);
 
-            let lastPos = isH ? e.clientY : e.clientX;
-            let rafId   = null;
+            let rafId = null;
 
             const onMove = (ev) => {
-                const pos   = isH ? ev.clientY : ev.clientX;
-                const delta = pos - lastPos;
-                lastPos = pos;
+                const pos    = isH ? ev.clientY : ev.clientX;
+                const origin = isH ? rect.top   : rect.left;
 
-                const child0Size = isH
-                    ? splitNode.children[0].el.offsetHeight
-                    : splitNode.children[0].el.offsetWidth;
-
-                splitNode.ratio = Math.max(0.1, Math.min(0.9, (child0Size + delta) / totalSize));
+                splitNode.ratio = Math.max(0.1, Math.min(0.9, (pos - origin - resizerPx / 2) / usable));
                 this._applyRatio(splitNode);
                 // Throttle fit() con RAF; solo visual (sin notificar al PTY) durante el drag
                 if (rafId) cancelAnimationFrame(rafId);

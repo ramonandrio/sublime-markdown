@@ -1976,7 +1976,8 @@ body {
 }
 
 /* Selector de perfil para split */
-.pane-split-picker {
+.pane-split-picker,
+.new-tab-picker {
     position: relative;
 }
 

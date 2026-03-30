@@ -849,6 +849,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Abrir Terminal (Solo Electron)
     const openTerminalMenuBtn = document.getElementById('openTerminalMenuBtn');
+    const menuTerminalDropdown = document.getElementById('menuTerminalProfileDropdown');
     if (openTerminalMenuBtn && typeof window.require !== 'undefined') {
         openTerminalMenuBtn.style.display = 'block';
         openTerminalMenuBtn.addEventListener('click', () => {
@@ -856,6 +857,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.terminalCtrl.openTerminal();
             }
         });
+        // Right-click: elegir perfil
+        if (menuTerminalDropdown) {
+            const profiles = [
+                { id: 'terminal', label: 'Terminal',  icon: '>' },
+                { id: 'claude',   label: 'Claude',    icon: '✦' },
+                { id: 'gemini',   label: 'Gemini',    icon: '◆' },
+                { id: 'openai',   label: 'ChatGPT',   icon: '●' },
+            ];
+            for (const profile of profiles) {
+                const item = document.createElement('button');
+                item.className = 'pane-profile-item';
+                item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    menuTerminalDropdown.classList.remove('open');
+                    if (window.terminalCtrl) window.terminalCtrl.openTerminal({ profile: profile.id });
+                });
+                menuTerminalDropdown.appendChild(item);
+            }
+            openTerminalMenuBtn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
+                    if (d !== menuTerminalDropdown) d.classList.remove('open');
+                });
+                const isOpen = menuTerminalDropdown.classList.toggle('open');
+                if (isOpen) {
+                    const btnRect = openTerminalMenuBtn.getBoundingClientRect();
+                    const ddHeight = menuTerminalDropdown.scrollHeight;
+                    const ddWidth = menuTerminalDropdown.offsetWidth || 140;
+                    let top = btnRect.bottom + 2;
+                    if (top + ddHeight > window.innerHeight - 8) top = btnRect.top - ddHeight - 2;
+                    if (top < 8) top = 8;
+                    let left = btnRect.right - ddWidth;
+                    if (left < 8) left = 8;
+                    menuTerminalDropdown.style.top = top + 'px';
+                    menuTerminalDropdown.style.left = left + 'px';
+                }
+            });
+            document.addEventListener('click', (e) => {
+                if (!openTerminalMenuBtn.parentElement.contains(e.target)) menuTerminalDropdown.classList.remove('open');
+            });
+        }
     }
 
     // Abrir carpeta local (desde dentro de la app)
@@ -1302,6 +1346,14 @@ document.addEventListener('DOMContentLoaded', () => {
             itemRow.appendChild(actionsContainer);
 
             itemContainer.appendChild(itemRow);
+
+            // Make directory items draggable for terminal attachment
+            itemRow.draggable = true;
+            itemRow.addEventListener('dragstart', (e) => {
+                e.stopPropagation();
+                e.dataTransfer.setData('text/plain', fullPath);
+                e.dataTransfer.effectAllowed = 'copy';
+            });
 
             const childrenContainer = document.createElement('div');
             childrenContainer.className = 'children-container';
