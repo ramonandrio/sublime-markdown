@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- LINE NUMBERS (scroll-anchored via shared container + mirror height) ---
     function updateLineNumbers() {
         if (!lineNumbers) return;
+        // Skip measurement when the editor panel is hidden — dimensions would be 0
+        if (editorPanel && editorPanel.style.display === 'none') return;
         const lines = markdownEditor.value.split('\n');
 
         // Resize textarea to fit content (parent container scrolls)
@@ -35,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const editorWidth = markdownEditor.clientWidth
             - parseFloat(getComputedStyle(markdownEditor).paddingLeft)
             - parseFloat(getComputedStyle(markdownEditor).paddingRight);
+        if (editorWidth <= 0) return;
         mirror.style.width = editorWidth + 'px';
 
         const lineHeight = parseFloat(getComputedStyle(markdownEditor).lineHeight);
@@ -85,8 +88,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentNodeServer = false;
     let allRepos = [];
     let expandedFolders = new Set();
-    let splitGroup = null; // { left: tabId, right: tabId } o null si no hay split activo
+    let splitGroups = []; // Array de { left: tabId, right: tabId } — pares de tabs emparejados
     let splitFlexPct = 50; // porcentaje del panel izquierdo (para recordar el resize)
+
+    // Busca el splitGroup al que pertenece un tabId, o null
+    function findSplitGroupFor(tabId) {
+        return splitGroups.find(g => g.left === tabId || g.right === tabId) || null;
+    }
 
     // Bloquear webviews/iframes durante drag resize
     function _blockWebviews() {
@@ -1121,8 +1129,9 @@ document.addEventListener('DOMContentLoaded', () => {
         markdownContent.innerHTML = activeTab.content;
 
         // Actualizar split view si este tab es el partner visible
-        if (splitGroup && splitMarkdownContent) {
-            const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+        const activeGroup = findSplitGroupFor(activeTabId);
+        if (activeGroup && splitMarkdownContent) {
+            const partnerId = activeGroup.left === activeTabId ? activeGroup.right : activeGroup.left;
             if (activeTab.id === partnerId) {
                 splitMarkdownContent.innerHTML = activeTab.content;
             }
@@ -1533,10 +1542,13 @@ document.addEventListener('DOMContentLoaded', () => {
         openTabs.forEach((tabData, index) => {
             const tabEl = document.createElement('div');
             const isActive = tabData.id === activeTabId;
-            const isInSplit = splitGroup && (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
-            const isSplitPartner = splitGroup && tabData.id !== activeTabId &&
-                (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
-            tabEl.className = `tab${isActive ? ' active' : ''}${isSplitPartner ? ' in-split' : ''}`;
+            const tabSplitGroup = findSplitGroupFor(tabData.id);
+            const isInSplit = !!tabSplitGroup;
+            const isSplitLeft = tabSplitGroup && tabData.id === tabSplitGroup.left;
+            const isSplitRight = tabSplitGroup && tabData.id === tabSplitGroup.right;
+            const isGroupActive = tabSplitGroup &&
+                (tabSplitGroup.left === activeTabId || tabSplitGroup.right === activeTabId);
+            tabEl.className = `tab${isActive || isGroupActive ? ' active' : ''}${isInSplit ? ' in-split-group' : ''}${isSplitLeft ? ' split-left' : ''}${isSplitRight ? ' split-right' : ''}`;
             tabEl.style.display = 'flex';
             tabEl.draggable = true;
             tabEl.dataset.tabIndex = index;
@@ -1732,7 +1744,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Split view: mostrar u ocultar según el tab activo pertenezca al grupo
-            if (splitGroup && (fileId === splitGroup.left || fileId === splitGroup.right)) {
+            const group = findSplitGroupFor(fileId);
+            if (group) {
                 showSplitForTab(fileId);
             } else {
                 hideSplitPanels();
@@ -1772,9 +1785,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ipcRenderer.invoke('proto-server-stop', tab.protoFolderPath);
         }
 
-        // Si el tab está en el split group, deshacer el split
-        if (splitGroup && (fileId === splitGroup.left || fileId === splitGroup.right)) {
-            closeSplitView();
+        // Si el tab está en un split group, deshacer ese split
+        const closingGroup = findSplitGroupFor(fileId);
+        if (closingGroup) {
+            removeSplitGroup(closingGroup);
         }
 
         const index = openTabs.findIndex(t => t.id === fileId);
@@ -1796,26 +1810,45 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================
     // SPLIT VIEW (vista dividida tipo Chrome)
     // ===================================
-    // splitGroup = { left: tabId, right: tabId } — par de tabs emparejados
-    // Al activar un tab del par, se muestra el split. Al activar otro tab, vista completa.
+    // splitGroups = [{ left, right }, ...] — pares de tabs emparejados
+    // Al activar un tab de un par, se muestra el split. Al activar otro tab, vista completa.
 
     const splitPanel = document.getElementById('splitPanel');
     const splitDivider = document.getElementById('splitDivider');
     const splitMarkdownContent = document.getElementById('splitMarkdownContent');
-    const splitPanelFilename = document.getElementById('splitPanelFilename');
     const splitPanelClose = document.getElementById('splitPanelClose');
 
     function createSplitGroup(leftTabId, rightTabId) {
-        splitGroup = { left: leftTabId, right: rightTabId };
+        // Si alguno de los dos ya está en un split, quitar ese split primero
+        const existingLeft = findSplitGroupFor(leftTabId);
+        if (existingLeft) removeSplitGroup(existingLeft);
+        const existingRight = findSplitGroupFor(rightTabId);
+        if (existingRight) removeSplitGroup(existingRight);
+
+        // Mover las pestañas para que estén juntas en openTabs
+        const leftIdx = openTabs.findIndex(t => t.id === leftTabId);
+        const rightIdx = openTabs.findIndex(t => t.id === rightTabId);
+        if (leftIdx !== -1 && rightIdx !== -1 && Math.abs(leftIdx - rightIdx) !== 1) {
+            const [rightTab] = openTabs.splice(openTabs.findIndex(t => t.id === rightTabId), 1);
+            const newLeftIdx = openTabs.findIndex(t => t.id === leftTabId);
+            openTabs.splice(newLeftIdx + 1, 0, rightTab);
+        }
+
+        splitGroups.push({ left: leftTabId, right: rightTabId });
         splitFlexPct = 50;
-        // Activar el tab izquierdo para que se muestre el split
         setActiveTab(leftTabId);
     }
 
-    function closeSplitView() {
-        splitGroup = null;
+    function removeSplitGroup(group) {
+        splitGroups = splitGroups.filter(g => g !== group);
         hideSplitPanels();
         renderTabs();
+    }
+
+    function closeSplitView() {
+        // Cierra el split del tab activo
+        const group = findSplitGroupFor(activeTabId);
+        if (group) removeSplitGroup(group);
     }
 
     function hideSplitPanels() {
@@ -1828,6 +1861,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Muestra el split con el contenido del tab compañero
     function showSplitForTab(activeId) {
+        const splitGroup = findSplitGroupFor(activeId);
         if (!splitGroup) return;
 
         const partnerId = splitGroup.left === activeId ? splitGroup.right : splitGroup.left;
@@ -1837,8 +1871,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        splitPanelFilename.textContent = partnerTab.name;
-        splitPanelFilename.title = partnerTab.path || partnerTab.name;
 
         if (partnerTab.content) {
             splitMarkdownContent.innerHTML = partnerTab.content;
@@ -1885,15 +1917,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Actualizar si sigue siendo el partner visible
-            if (splitGroup) {
-                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+            const loadGroup = findSplitGroupFor(activeTabId);
+            if (loadGroup) {
+                const partnerId = loadGroup.left === activeTabId ? loadGroup.right : loadGroup.left;
                 if (tabData.id === partnerId) {
                     splitMarkdownContent.innerHTML = tabData.content;
                 }
             }
         } catch (err) {
-            if (splitGroup) {
-                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+            const errGroup = findSplitGroupFor(activeTabId);
+            if (errGroup) {
+                const partnerId = errGroup.left === activeTabId ? errGroup.right : errGroup.left;
                 if (tabData.id === partnerId) {
                     splitMarkdownContent.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
                 }
@@ -1955,7 +1989,7 @@ document.addEventListener('DOMContentLoaded', () => {
         menu.className = 'tab-context-menu';
 
         const isActive = tabData.id === activeTabId;
-        const isInSplit = splitGroup && (tabData.id === splitGroup.left || tabData.id === splitGroup.right);
+        const isInSplit = !!findSplitGroupFor(tabData.id);
         const svgSplit = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3h6v18H9zM3 3h6v18H3z"/>
         </svg>`;
@@ -1967,7 +2001,8 @@ document.addEventListener('DOMContentLoaded', () => {
             unsplitItem.innerHTML = `${svgSplit} Deshacer vista dividida`;
             unsplitItem.addEventListener('click', () => {
                 removeContextMenu();
-                closeSplitView();
+                const group = findSplitGroupFor(tabData.id);
+                if (group) removeSplitGroup(group);
             });
             menu.appendChild(unsplitItem);
         } else if (isActive && openTabs.length > 1) {
@@ -2137,8 +2172,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isTocOpen) generateTOC();
             }
             // Actualizar split view si este tab es el partner visible
-            if (splitGroup && splitMarkdownContent) {
-                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+            const openGroup = findSplitGroupFor(activeTabId);
+            if (openGroup && splitMarkdownContent) {
+                const partnerId = openGroup.left === activeTabId ? openGroup.right : openGroup.left;
                 if (tabData.id === partnerId) {
                     splitMarkdownContent.innerHTML = tabData.content;
                 }
@@ -2151,8 +2187,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
             }
-            if (splitGroup && splitMarkdownContent) {
-                const partnerId = splitGroup.left === activeTabId ? splitGroup.right : splitGroup.left;
+            const errGroup2 = findSplitGroupFor(activeTabId);
+            if (errGroup2 && splitMarkdownContent) {
+                const partnerId = errGroup2.left === activeTabId ? errGroup2.right : errGroup2.left;
                 if (tabData.id === partnerId) {
                     splitMarkdownContent.innerHTML = tabData.content;
                 }
@@ -2376,23 +2413,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // VISIBILIDAD DEL EDITOR
     // ===================================
 
+    const editorResizer = document.getElementById('editorResizer');
+
     function updateEditorVisibility() {
         // If a Coda tab is active, the editor must stay hidden regardless of the toggle
         const activeTabId = document.querySelector('.tab.active')?.dataset.id;
         const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
         if (activeTab && activeTab.isCoda) {
             editorPanel.style.display = 'none';
+            editorResizer.style.display = 'none';
             return;
         }
 
         if (isEditorOpen) {
             editorPanel.style.display = 'flex';
+            editorResizer.style.display = 'block';
+            // Recalculate line numbers after the panel is visible so dimensions are correct
+            requestAnimationFrame(() => updateLineNumbers());
             toggleSplitBtn.innerHTML = `
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 4px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
                 Vista Previa
             `;
         } else {
             editorPanel.style.display = 'none';
+            editorResizer.style.display = 'none';
             toggleSplitBtn.innerHTML = `
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 4px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                 Editar
@@ -2449,6 +2493,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function onMouseUp() {
             tocResizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            _unblockWebviews();
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        }
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Editor / Preview resizer drag
+    editorResizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const container = editorPanel.parentElement;
+        const startX = e.clientX;
+        const startWidth = editorPanel.offsetWidth;
+        const containerWidth = container.offsetWidth;
+
+        editorResizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        _blockWebviews();
+
+        function onMouseMove(ev) {
+            const delta = ev.clientX - startX;
+            const newWidth = Math.max(200, Math.min(containerWidth - 200, startWidth + delta));
+            editorPanel.style.width = newWidth + 'px';
+            updateLineNumbers();
+        }
+
+        function onMouseUp() {
+            editorResizer.classList.remove('dragging');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             _unblockWebviews();

@@ -302,7 +302,7 @@
             <div class="split-view-container" style="display: flex; flex: 1; overflow: hidden;">
                 <!-- Panel de Edición (Oculto por defecto) -->
                 <div id="editorPanel" class="editor-panel"
-                    style="display: none; width: 50%; border-right: 1px solid var(--border-color); flex-direction: column;">
+                    style="display: none; width: 50%; flex-direction: column;">
                     <div class="editor-with-lines">
                         <div id="lineNumbers" class="line-numbers" aria-hidden="true"></div>
                         <textarea id="markdownEditor" spellcheck="false"
@@ -310,6 +310,9 @@
                         <div id="editorLineMirror" class="editor-line-mirror" aria-hidden="true"></div>
                     </div>
                 </div>
+
+                <!-- Divider arrastrable entre editor y preview -->
+                <div id="editorResizer" class="split-divider" style="display: none;"></div>
 
                 <!-- Panel de Coda (webview, oculto por defecto) -->
                 <div id="codaPanel" style="display:none; width: 100%; height: 100%; flex: 1 1 auto; overflow: hidden;">
@@ -343,10 +346,7 @@
 
                 <!-- Panel de Split View (Oculto por defecto) -->
                 <div id="splitPanel" class="split-panel" style="display: none;">
-                    <div class="split-panel-header">
-                        <span class="split-panel-filename" id="splitPanelFilename"></span>
-                        <button id="splitPanelClose" class="split-panel-close" title="Cerrar panel dividido">✕</button>
-                    </div>
+                    <button id="splitPanelClose" class="split-panel-close" title="Cerrar panel dividido">✕</button>
                     <div class="split-panel-content">
                         <div id="splitMarkdownContent" class="markdown-body"></div>
                     </div>
