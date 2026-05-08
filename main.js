@@ -540,7 +540,7 @@ ipcMain.handle('proto-server-start', async (event, folderPath) => {
             }
         });
 
-        const server = protoApp.listen(0, () => {
+        const server = protoApp.listen(0, '127.0.0.1', () => {
             const port = server.address().port;
             protoServers.set(folderPath, { server, port });
             log(`[proto-server] Serving ${folderPath} on port ${port}`);

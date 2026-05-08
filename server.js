@@ -77,7 +77,7 @@ function createServer(initialDir) {
         if (!filePath) return res.status(400).json({ error: 'File path is required' });
 
         const safePath = path.resolve(ROOT_DIR, filePath);
-        if (!safePath.startsWith(ROOT_DIR)) {
+        if (safePath !== ROOT_DIR && !safePath.startsWith(ROOT_DIR + path.sep)) {
             return res.status(403).json({ error: 'Access denied: Directory traversal detected' });
         }
 
@@ -103,7 +103,9 @@ function createServer(initialDir) {
         if (!filePath || content === undefined) return res.status(400).json({ error: 'File path and content are required' });
 
         const safePath = path.resolve(ROOT_DIR, filePath);
-        if (!safePath.startsWith(ROOT_DIR)) return res.status(403).json({ error: 'Access denied' });
+        if (safePath !== ROOT_DIR && !safePath.startsWith(ROOT_DIR + path.sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
 
         if (Buffer.byteLength(content, 'utf8') > MAX_FILE_SIZE) {
             return res.status(413).json({ error: 'Content too large (max 10 MB)' });
@@ -121,7 +123,9 @@ function createServer(initialDir) {
         if (!folderPath) return res.status(400).json({ error: 'Folder path is required' });
 
         const safePath = path.resolve(ROOT_DIR, folderPath);
-        if (!safePath.startsWith(ROOT_DIR)) return res.status(403).json({ error: 'Access denied' });
+        if (safePath !== ROOT_DIR && !safePath.startsWith(ROOT_DIR + path.sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
 
         try {
             if (!fs.existsSync(safePath)) {
@@ -171,7 +175,7 @@ function createServer(initialDir) {
     app.getRootDir = () => ROOT_DIR;
 
     return new Promise((resolve, reject) => {
-        const server = app.listen(PORT, (err) => {
+        const server = app.listen(PORT, '127.0.0.1', (err) => {
             if (err) return reject(err);
             const actualPort = server.address().port;
             console.log(`Markdown Viewer sub-server running at http://localhost:${actualPort} - Target dir: ${ROOT_DIR}`);
