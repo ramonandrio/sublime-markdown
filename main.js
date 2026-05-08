@@ -191,7 +191,11 @@ function _readKeystore() {
 }
 
 function _writeKeystore(store) {
-    fs.writeFileSync(KEYSTORE_PATH, JSON.stringify(store), 'utf8');
+    // Escritura atómica: si el proceso muere a mitad de la escritura, el
+    // keystore.json original sigue intacto en lugar de quedar truncado.
+    const tmp = KEYSTORE_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
+    fs.renameSync(tmp, KEYSTORE_PATH);
 }
 
 ipcMain.handle('keystore-get', (event, key) => {
