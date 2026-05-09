@@ -273,45 +273,53 @@ class TerminalController {
                 const now = Date.now();
                 if (!pane._activityStart) pane._activityStart = now;
                 pane._lastSignificantOutput = now;
-                pane._activityNotified = false;
+                if (!this._isLLMProcess(this._getProcessType(pane))) {
+                    pane._activityNotified = false;
+                }
 
                 // Indicador visual de actividad en la pestaña
                 const tab = this.tabs.get(pane.tabId);
-                const cmd = (pane.shellState?.currentCommand || '').trim().toLowerCase();
-                const isClaudeCmd = /^(claude|claude\s)/.test(cmd);
-                pane._isClaudeCmd = isClaudeCmd;
-                const thinkingClass = isClaudeCmd ? 'claude-thinking' : 'terminal-busy';
+                const processType = this._getProcessType(pane);
+                pane._processType = processType;
+                const thinkingClass = this._getSpinnerClass(processType);
                 if (tab) {
-                    tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
+                    tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
                     tab.tabBtn.classList.add(thinkingClass);
                 }
 
                 // Timer: si no hay output significativo en 8s, la respuesta terminó
                 if (pane._silenceTimer) clearTimeout(pane._silenceTimer);
+                const silenceMs = this._isLLMProcess(processType) ? 20000 : 8000;
                 pane._silenceTimer = setTimeout(() => {
                     const activityDuration = (pane._lastSignificantOutput || now) - pane._activityStart;
+                    const isLLM = this._isLLMProcess(pane._processType);
+
                     if (pane._activityNotified) return;
-                    pane._activityStart = null;
+
                     pane._silenceTimer = null;
                     pane._activityNotified = true;
 
                     // Actualizar indicador visual
                     if (tab) {
-                        tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
-                        if (pane._isClaudeCmd && this._needsUserAction(pane._recentOutput || '')) {
+                        tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
+                        if (isLLM && this._needsUserAction(pane._recentOutput || '')) {
                             tab.tabBtn.classList.add('claude-waiting');
                         }
                     }
 
-                    // Solo notificar si hubo actividad significativa >= 5s
-                    if (activityDuration >= 5000) {
-                        this._onCommandFinished(id, {
-                            command: pane.shellState?.currentCommand || 'Respuesta completada',
-                            exitCode: 0,
-                            duration: activityDuration
-                        });
+                    // LLM: nunca notificar desde el silence timer (solo vía OSC 633 D)
+                    // Terminal normal: notificar tras silencio como antes
+                    if (!isLLM) {
+                        pane._activityStart = null;
+                        if (activityDuration >= 5000) {
+                            this._onCommandFinished(id, {
+                                command: pane.shellState?.currentCommand || 'Respuesta completada',
+                                exitCode: 0,
+                                duration: activityDuration
+                            });
+                        }
                     }
-                }, 8000);
+                }, silenceMs);
             }
         });
 
@@ -424,6 +432,68 @@ class TerminalController {
             e.stopPropagation();
             if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
             this._renameTab(tabId);
+        });
+
+        // Drag reorder (mismo patrón que tabs de documentos)
+        tabBtn.draggable = true;
+
+        tabBtn.addEventListener('dragstart', (e) => {
+            this._draggedTabId = tabId;
+            tabBtn.classList.add('tab-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/x-terminal-tab-reorder', tabId);
+        });
+
+        tabBtn.addEventListener('dragend', () => {
+            this._draggedTabId = null;
+            tabBtn.classList.remove('tab-dragging');
+            this.tabsContainer.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('tab-drag-over'));
+        });
+
+        tabBtn.addEventListener('dragover', (e) => {
+            if (!this._draggedTabId || this._draggedTabId === tabId) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            tabBtn.classList.add('tab-drag-over');
+        });
+
+        tabBtn.addEventListener('dragleave', () => {
+            tabBtn.classList.remove('tab-drag-over');
+        });
+
+        tabBtn.addEventListener('drop', (e) => {
+            e.preventDefault();
+            tabBtn.classList.remove('tab-drag-over');
+            const draggedId = this._draggedTabId;
+            if (!draggedId || draggedId === tabId) return;
+
+            const draggedEl = this.tabs.get(draggedId)?.tabBtn;
+            if (!draggedEl) return;
+
+            const children  = [...this.tabsContainer.children];
+            const fromIndex = children.indexOf(draggedEl);
+            const toIndex   = children.indexOf(tabBtn);
+            if (fromIndex === -1 || toIndex === -1) return;
+
+            if (fromIndex < toIndex) {
+                this.tabsContainer.insertBefore(draggedEl, tabBtn.nextSibling);
+            } else {
+                this.tabsContainer.insertBefore(draggedEl, tabBtn);
+            }
+
+            const reordered = new Map();
+            for (const el of this.tabsContainer.children) {
+                const id = el.dataset.tabId;
+                if (id && this.tabs.has(id)) reordered.set(id, this.tabs.get(id));
+            }
+            this.tabs = reordered;
+        });
+
+        // Context menu: vincular/desvincular con documento
+        tabBtn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this._showTerminalTabContextMenu(e, tabId);
         });
 
         this.tabsContainer.appendChild(tabBtn);
@@ -723,12 +793,13 @@ class TerminalController {
                 case 'C': { // Command executed (preexec)
                     shellState.commandRunning = true;
                     shellState.commandStartTime = Date.now();
-                    // Mostrar spinner en la pestaña
+                    // Mostrar spinner en la pestaña (tipo correcto según comando)
                     const pC = this.panes.get(ptyId);
                     const tC = this.tabs.get(pC?.tabId);
-                    if (tC) {
-                        tC.tabBtn.classList.remove('claude-thinking', 'terminal-busy');
-                        tC.tabBtn.classList.add('terminal-busy');
+                    if (tC && pC) {
+                        const spinnerClass = this._getSpinnerClass(this._getProcessType(pC));
+                        tC.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
+                        tC.tabBtn.classList.add(spinnerClass);
                     }
                     break;
                 }
@@ -740,9 +811,10 @@ class TerminalController {
                     const p = this.panes.get(ptyId);
                     if (p?._silenceTimer) { clearTimeout(p._silenceTimer); p._silenceTimer = null; }
                     p._activityStart = null;
+                    p._activityNotified = false;
                     // Quitar indicador visual de la pestaña
                     const t = this.tabs.get(p?.tabId);
-                    if (t) t.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting');
+                    if (t) t.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
                     this._onCommandFinished(ptyId, {
                         command: shellState.currentCommand,
                         exitCode,
@@ -763,7 +835,8 @@ class TerminalController {
         term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
-            _writeBuf: '', _writeTimer: null, shellState, themeName: 'Basic' });
+            _writeBuf: '', _writeTimer: null, shellState, themeName: 'Basic',
+            _profileId: options.profile || 'terminal' });
 
         // Activar pane al hacer click en él
         el.addEventListener('mousedown', () => this._setActiveLeaf(tabId, ptyId));
@@ -1234,17 +1307,46 @@ class TerminalController {
         }
     }
 
+    // ── Clasificación de proceso (terminal vs LLM) ─────────────────────────────
+    _getProcessType(pane) {
+        if (pane._profileId && pane._profileId !== 'terminal') return pane._profileId;
+        const cmd = (pane.shellState?.currentCommand || '').trim().toLowerCase();
+        if (!cmd) return 'terminal';
+        for (const p of PANE_PROFILES) {
+            if (p.id === 'terminal') continue;
+            if (cmd.startsWith(p.id) || cmd.startsWith(p.id + ' ')) return p.id;
+            if (p.command) {
+                const cmdWord = p.command.split(/\s+/).pop().split('/').pop().toLowerCase();
+                if (cmd.startsWith(cmdWord)) return p.id;
+            }
+        }
+        return 'terminal';
+    }
+
+    _getSpinnerClass(processType) {
+        switch (processType) {
+            case 'claude': return 'claude-thinking';
+            case 'gemini': return 'gemini-thinking';
+            case 'openai': return 'openai-thinking';
+            default: return 'terminal-busy';
+        }
+    }
+
+    _isLLMProcess(processType) {
+        return processType !== 'terminal';
+    }
+
     // ── Detectar si Claude necesita acción del usuario ─────────────────────────
     _needsUserAction(rawOutput) {
         const clean = rawOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
                                .replace(/\x1b\][^\x07]*\x07/g, '')
                                .replace(/\x1b\].*?\x1b\\/g, '');
-        return /Do you want to proceed|Enter to select|Esc to cancel/i.test(clean);
+        return /Do you want to proceed|Enter to select|Esc to cancel|yes\/no|\(y\/n\)|allow|deny|approve|reject|permission|tool use|want to allow|press enter|waiting for|confirm/i.test(clean);
     }
 
     // ── Notificación cuando un comando largo termina ──────────────────────────
     _onCommandFinished(ptyId, info) {
-        const THRESHOLD_MS = 15000; // 15 segundos
+        const THRESHOLD_MS = 5000; // 5 segundos
         if (!info || info.duration < THRESHOLD_MS) return;
 
         // Solo notificar si el terminal no tiene el foco
@@ -1463,6 +1565,114 @@ class TerminalController {
                 return;
             }
         }
+    }
+
+    // Vincula (o desvincula con fileId=null) una pestaña de terminal con un doc.
+    // Enforce 1:1: si otra pestaña/pane ya estaba vinculado a ese fileId, se limpia.
+    _setTerminalLink(tabId, fileId) {
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        if (fileId) {
+            for (const [otherId, otherTab] of this.tabs) {
+                if (otherId !== tabId && otherTab.linkedFileId === fileId) {
+                    otherTab.linkedFileId = null;
+                }
+            }
+            for (const pane of this.panes.values()) {
+                if (pane.tabId !== tabId && pane.linkedFileId === fileId) {
+                    pane.linkedFileId = null;
+                }
+            }
+        }
+
+        tab.linkedFileId = fileId;
+        // Sincronizar el pane activo (usado por el check de auto-link al crear nuevas tabs)
+        const primaryPtyId = tab.activeLeafPtyId;
+        if (primaryPtyId) {
+            const pane = this.panes.get(primaryPtyId);
+            if (pane) pane.linkedFileId = fileId;
+        }
+    }
+
+    _showTerminalTabContextMenu(e, tabId) {
+        document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+
+        const tab = this.tabs.get(tabId);
+        if (!tab) return;
+
+        const activeDocId   = window.app?.getActiveTabId?.();
+        const activeDocName = window.app?.getActiveTabName?.();
+        const currentLink   = tab.linkedFileId;
+
+        const linkSvg   = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>`;
+        const unlinkSvg = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/></svg>`;
+
+        const menu = document.createElement('div');
+        menu.className = 'tab-context-menu';
+
+        if (currentLink) {
+            const header = document.createElement('div');
+            header.className = 'tab-context-menu-item';
+            header.style.opacity = '0.5';
+            header.style.cursor = 'default';
+            header.style.fontSize = '0.7rem';
+            header.textContent = `Vinculado a: ${currentLink}`;
+            menu.appendChild(header);
+        }
+
+        if (activeDocId && activeDocId !== currentLink) {
+            const linkItem = document.createElement('div');
+            linkItem.className = 'tab-context-menu-item';
+            linkItem.innerHTML = `${linkSvg} Vincular a "${activeDocName || activeDocId}"`;
+            linkItem.addEventListener('click', () => {
+                document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+                this._setTerminalLink(tabId, activeDocId);
+            });
+            menu.appendChild(linkItem);
+        }
+
+        if (currentLink) {
+            const unlinkItem = document.createElement('div');
+            unlinkItem.className = 'tab-context-menu-item';
+            unlinkItem.innerHTML = `${unlinkSvg} Desvincular`;
+            unlinkItem.addEventListener('click', () => {
+                document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+                this._setTerminalLink(tabId, null);
+            });
+            menu.appendChild(unlinkItem);
+        }
+
+        if (menu.children.length === 0 || (!activeDocId && !currentLink)) {
+            if (menu.children.length === 0) {
+                const hint = document.createElement('div');
+                hint.className = 'tab-context-menu-item';
+                hint.style.opacity = '0.5';
+                hint.style.cursor = 'default';
+                hint.textContent = 'No hay documento activo para vincular';
+                menu.appendChild(hint);
+            }
+        }
+
+        menu.style.left = e.clientX + 'px';
+        menu.style.top  = e.clientY + 'px';
+        document.body.appendChild(menu);
+
+        const rect = menu.getBoundingClientRect();
+        if (rect.right  > window.innerWidth)  menu.style.left = (window.innerWidth  - rect.width  - 8) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top  = (window.innerHeight - rect.height - 8) + 'px';
+
+        // Cerrar al clicar fuera (o en otro contextmenu)
+        const close = (ev) => {
+            if (ev && menu.contains(ev.target)) return;
+            menu.remove();
+            document.removeEventListener('click', close);
+            document.removeEventListener('contextmenu', close);
+        };
+        setTimeout(() => {
+            document.addEventListener('click', close);
+            document.addEventListener('contextmenu', close);
+        }, 0);
     }
 
     closeAll() {

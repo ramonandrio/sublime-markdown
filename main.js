@@ -150,9 +150,41 @@ function setupMenu() {
                 },
                 ...(!app.isPackaged ? [{ role: 'toggleDevTools' }] : []),
                 { type: 'separator' },
-                { role: 'resetZoom' },
-                { role: 'zoomIn' },
-                { role: 'zoomOut' },
+                {
+                    label: 'Actual Size',
+                    accelerator: 'CommandOrControl+0',
+                    click: (_, focusedWindow) => {
+                        if (focusedWindow) focusedWindow.webContents.setZoomLevel(0);
+                    }
+                },
+                {
+                    label: 'Zoom In',
+                    accelerator: 'CommandOrControl+Plus',
+                    click: (_, focusedWindow) => {
+                        if (!focusedWindow) return;
+                        const lvl = focusedWindow.webContents.getZoomLevel();
+                        focusedWindow.webContents.setZoomLevel(lvl + 0.5);
+                    }
+                },
+                {
+                    label: 'Zoom In (=)',
+                    accelerator: 'CommandOrControl+=',
+                    visible: false,
+                    click: (_, focusedWindow) => {
+                        if (!focusedWindow) return;
+                        const lvl = focusedWindow.webContents.getZoomLevel();
+                        focusedWindow.webContents.setZoomLevel(lvl + 0.5);
+                    }
+                },
+                {
+                    label: 'Zoom Out',
+                    accelerator: 'CommandOrControl+-',
+                    click: (_, focusedWindow) => {
+                        if (!focusedWindow) return;
+                        const lvl = focusedWindow.webContents.getZoomLevel();
+                        focusedWindow.webContents.setZoomLevel(lvl - 0.5);
+                    }
+                },
                 { type: 'separator' },
                 { role: 'togglefullscreen' }
             ]

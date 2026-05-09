@@ -107,10 +107,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Context menu compartido (sidebar + tabs)
     let activeContextMenu = null;
     function removeContextMenu() {
-        if (activeContextMenu) {
-            activeContextMenu.remove();
-            activeContextMenu = null;
-        }
+        document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+        activeContextMenu = null;
     }
     document.addEventListener('click', removeContextMenu);
 
@@ -1261,7 +1259,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (entry.kind === 'directory') {
                 item.children.push(await getTreeFromHandle(entry, pathPrefix + dirHandle.name + '/'));
-            } else if (entry.name.endsWith('.md') || entry.name.endsWith('.html')) {
+            } else if (/\.(md|html|pdf|docx?|pptx?)$/i.test(entry.name)) {
                 item.children.push({
                     name: entry.name,
                     path: pathPrefix + dirHandle.name + '/' + entry.name,
@@ -1400,10 +1398,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const fileIcon = document.createElement('span');
             fileIcon.className = 'file-icon';
-            if (item.name.endsWith('.html')) {
+            const lowerName = item.name.toLowerCase();
+            const fileDocBase = `<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>`;
+            const fileSvgWithLabel = (label) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${fileDocBase}<text x="12" y="19" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">${label}</text></svg>`;
+            if (lowerName.endsWith('.html')) {
                 fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>`;
+            } else if (lowerName.endsWith('.pdf')) {
+                fileIcon.innerHTML = fileSvgWithLabel('PDF');
+            } else if (lowerName.endsWith('.doc') || lowerName.endsWith('.docx')) {
+                fileIcon.innerHTML = fileSvgWithLabel('DOC');
+            } else if (lowerName.endsWith('.ppt') || lowerName.endsWith('.pptx')) {
+                fileIcon.innerHTML = fileSvgWithLabel('PPT');
             } else {
-                fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+                fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${fileDocBase}</svg>`;
             }
             iconWrapper.appendChild(fileIcon);
 
@@ -1430,6 +1437,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             itemRow.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (!/\.(md|html)$/i.test(item.name)) return;
                 openFileTab(item);
                 if (isMobile()) closeMobileSidebar();
             });

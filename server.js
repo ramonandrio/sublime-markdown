@@ -44,7 +44,7 @@ function createServer(initialDir) {
                     const stat = fs.statSync(fullPath);
                     if (stat.isDirectory()) {
                         item.children.push(getDirectoryTree(fullPath, basePath));
-                    } else if (file.endsWith('.md') || file.endsWith('.html')) {
+                    } else if (/\.(md|html|pdf|docx?|pptx?)$/i.test(file)) {
                         item.children.push({
                             name: file,
                             path: path.relative(ROOT_DIR, fullPath),

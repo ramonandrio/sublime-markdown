@@ -1676,6 +1676,34 @@ body {
     50% { opacity: 0.3; }
 }
 
+/* Gemini Thinking — spinner azul */
+.terminal-tab.gemini-thinking .terminal-tab-name::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border: 2px solid #4285F4;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: tab-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
+/* ChatGPT Thinking — spinner verde */
+.terminal-tab.openai-thinking .terminal-tab-name::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border: 2px solid #10A37F;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: tab-spin 0.8s linear infinite;
+    vertical-align: middle;
+}
+
 .terminal-tab.active {
     background-color: var(--bg-darker);
     color: var(--text-primary);
