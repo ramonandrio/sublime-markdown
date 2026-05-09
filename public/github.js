@@ -5,13 +5,12 @@ const GitHubAPI = (() => {
     const TOKEN_KEY = 'github_token';
     let _token = null; // caché en memoria; cargado una vez en init()
 
-    const _ipc = (typeof window.require !== 'undefined')
-        ? window.require('electron').ipcRenderer : null;
+    const _api = window.api || null;
 
     // Llama a init() una vez al arrancar la app para cargar el token cifrado.
     async function init() {
-        if (_ipc) {
-            _token = await _ipc.invoke('keystore-get', TOKEN_KEY);
+        if (_api) {
+            _token = await _api.keystoreGet(TOKEN_KEY);
         } else {
             // Fallback para ejecución en navegador sin Electron
             _token = localStorage.getItem('md_viewer_github_token');
@@ -24,8 +23,8 @@ const GitHubAPI = (() => {
 
     async function setToken(token) {
         _token = token;
-        if (_ipc) {
-            await _ipc.invoke('keystore-set', TOKEN_KEY, token);
+        if (_api) {
+            await _api.keystoreSet(TOKEN_KEY, token);
         } else {
             localStorage.setItem('md_viewer_github_token', token);
         }
@@ -33,8 +32,8 @@ const GitHubAPI = (() => {
 
     async function clearToken() {
         _token = null;
-        if (_ipc) {
-            await _ipc.invoke('keystore-remove', TOKEN_KEY);
+        if (_api) {
+            await _api.keystoreRemove(TOKEN_KEY);
         } else {
             localStorage.removeItem('md_viewer_github_token');
         }

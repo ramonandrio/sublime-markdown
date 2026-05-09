@@ -13,17 +13,15 @@ let Terminal, FitAddon, WebglAddon, WebLinksAddon;
 
 function loadTerminalLibs() {
     if (Terminal) return true;
-    try {
-        if (typeof window.require !== 'undefined') {
-            const xterm = window.require('@xterm/xterm');
-            Terminal = xterm.Terminal || xterm;
-            FitAddon = window.require('@xterm/addon-fit').FitAddon;
-            try { WebglAddon = window.require('@xterm/addon-webgl').WebglAddon; } catch (_) {}
-            try { WebLinksAddon = window.require('@xterm/addon-web-links').WebLinksAddon; } catch (_) {}
-            return !!Terminal;
-        }
-    } catch (e) { console.error('Error xterm libs:', e); }
-    return false;
+    // xterm + addons se cargan como <script> en index.html y exponen sus
+    // clases en window vía el wrapper UMD. xterm.js expone Terminal
+    // directo; los addons envuelven en { __esModule, FitAddon: class } —
+    // hay que desempaquetar la clase real.
+    Terminal      = window.Terminal;
+    FitAddon      = window.FitAddon?.FitAddon         || window.FitAddon;
+    WebglAddon    = window.WebglAddon?.WebglAddon     || window.WebglAddon;
+    WebLinksAddon = window.WebLinksAddon?.WebLinksAddon || window.WebLinksAddon;
+    return !!Terminal;
 }
 
 // Perfiles de arranque para terminales
@@ -173,9 +171,9 @@ class TerminalController {
         this.activeTabId = null;
         this._skipNotify = false;
 
-        const electron = (typeof window.require !== 'undefined') ? window.require('electron') : {};
-        this.ipcRenderer = electron.ipcRenderer || null;
-        this.webUtils = electron.webUtils || null;
+        // window.api viene de preload.js (contextBridge). En modo navegador puro
+        // (npm start sin Electron) no existe, así que se mantiene el null check.
+        this.api = window.api || null;
 
         // Callback para comunicación bidireccional con app.js
         this.onTerminalActivated = null;
@@ -248,9 +246,9 @@ class TerminalController {
 
     // ── IPC ──────────────────────────────────────────────────────────────────
     _initIpc() {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
 
-        this.ipcRenderer.on('terminal-output', (event, { id, data }) => {
+        this.api.onTerminalOutput(({ id, data }) => {
             const pane = this.panes.get(id);
             if (!pane) return;
             pane._writeBuf = (pane._writeBuf || '') + data;
@@ -323,7 +321,7 @@ class TerminalController {
             }
         });
 
-        this.ipcRenderer.on('terminal-exit', (event, { id }) => {
+        this.api.onTerminalExit(({ id }) => {
             // El PTY terminó inesperadamente
             if (this.panes.has(id)) this.closePane(id);
         });
@@ -389,7 +387,7 @@ class TerminalController {
     // ── Crear nueva pestaña con un único pane ─────────────────────────────────
     async createTab(options = {}) {
         if (!loadTerminalLibs()) return;
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
 
         // Auto-vincular con el archivo activo (igual que antes)
         if (!options.fileId && window.app?.getActiveTabId) {
@@ -518,7 +516,7 @@ class TerminalController {
         this.resizer.style.display = 'block';
 
         // Lanzar PTY
-        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) { this.closeTab(tabId); return; }
 
         // Crear nodo hoja y montarlo
@@ -832,7 +830,7 @@ class TerminalController {
             return true; // handled, don't render
         });
 
-        term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
+        term.onData(input => this.api?.terminalInput(ptyId, input));
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
             _writeBuf: '', _writeTimer: null, shellState, themeName: 'Basic',
@@ -1002,9 +1000,9 @@ class TerminalController {
             el.classList.remove('pane-drop-target');
 
             // 1. File.path — propiedad de Electron en objetos File del SO
-            if (e.dataTransfer.files?.length > 0 && this.webUtils) {
+            if (e.dataTransfer.files?.length > 0 && this.api) {
                 const paths = Array.from(e.dataTransfer.files)
-                    .map(f => this.webUtils.getPathForFile(f))
+                    .map(f => this.api.getPathForFile(f))
                     .filter(Boolean);
                 if (paths.length > 0) { this._sendPathToPane(ptyId, ...paths); return; }
             }
@@ -1043,16 +1041,16 @@ class TerminalController {
         // propia ruta se cierran, escapan con \' y se vuelven a abrir.
         const shellEscape = p => "'" + p.replace(/'/g, "'\\''") + "'";
         const text = paths.map(shellEscape).join(' ');
-        this.ipcRenderer?.send('terminal-input', { id: ptyId, input: text });
+        this.api?.terminalInput(ptyId, text);
     }
 
     // ── Attach desde picker nativo (botón toolbarAttachBtn) ──────────────────
     async _attachFilesFromPicker() {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
         const activeId = this.getActiveTerminalId();
         if (!activeId) return;
 
-        const filePaths = await this.ipcRenderer.invoke('select-file');
+        const filePaths = await this.api.selectFile();
         if (!filePaths || filePaths.length === 0) return;
 
         this._sendPathToPane(activeId, ...filePaths);
@@ -1117,7 +1115,7 @@ class TerminalController {
         if (!profile?.command) return;
         // Pequeño delay para que el shell esté listo
         setTimeout(() => {
-            this.ipcRenderer?.send('terminal-input', { id: ptyId, input: profile.command + '\n' });
+            this.api?.terminalInput(ptyId, profile.command + '\n');
         }, 300);
         // Actualizar título del pane
         const pane = this.panes.get(ptyId);
@@ -1129,7 +1127,7 @@ class TerminalController {
 
     // ── Dividir un pane ───────────────────────────────────────────────────────
     async splitPane(ptyId, dir, options = {}) {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
         const pane = this.panes.get(ptyId);
         if (!pane) return;
         const tab = this.tabs.get(pane.tabId);
@@ -1138,7 +1136,7 @@ class TerminalController {
         const oldLeaf = pane.leafNode;
 
         // Lanzar nuevo PTY
-        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) return;
 
         const newLeaf = this._makeLeafNode(ptyRes.id, pane.tabId);
@@ -1202,7 +1200,7 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (!pane) return;
 
-        this.ipcRenderer?.send('terminal-kill', { id: ptyId });
+        this.api?.terminalKill(ptyId);
         pane.term.dispose();
         // Limpiar listener del theme dropdown
         if (pane.leafNode.el._themeCleanup) pane.leafNode.el._themeCleanup();
@@ -1259,7 +1257,7 @@ class TerminalController {
         [...this.panes.values()]
             .filter(p => p.tabId === tabId)
             .forEach(p => {
-                this.ipcRenderer?.send('terminal-kill', { id: p.ptyId });
+                this.api?.terminalKill(p.ptyId);
                 p.term.dispose();
                 this.panes.delete(p.ptyId);
             });
@@ -1365,8 +1363,8 @@ class TerminalController {
             title: `${paneName} — ${status}`,
             body: `$ ${cmdText}  ·  ${seconds}s`
         };
-        if (this.ipcRenderer) {
-            this.ipcRenderer.send('terminal-notify', notifData);
+        if (this.api) {
+            this.api.terminalNotify(notifData);
         }
     }
 
@@ -1447,11 +1445,7 @@ class TerminalController {
         try {
             pane.fit.fit();
             if (notifyPty) {
-                this.ipcRenderer?.send('terminal-resize', {
-                    id:   leafNode.ptyId,
-                    cols: pane.term.cols,
-                    rows: pane.term.rows
-                });
+                this.api?.terminalResize(leafNode.ptyId, pane.term.cols, pane.term.rows);
             }
         } catch (_) {}
     }
@@ -1552,7 +1546,7 @@ class TerminalController {
     // ── API pública (usada por app.js) ────────────────────────────────────────
     openTerminal(options)    { return this.createTab(options); }
     getActiveTerminalId()    { return this.tabs.get(this.activeTabId)?.activeLeafPtyId ?? null; }
-    sendInput(id, data)      { this.ipcRenderer?.send('terminal-input', { id, input: data }); }
+    sendInput(id, data)      { this.api?.terminalInput(id, data); }
 
     activateTerminalForFile(fileId) {
         for (const [tabId, tab] of this.tabs) {

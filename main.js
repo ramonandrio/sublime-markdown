@@ -24,9 +24,10 @@ async function createWindow(initialDir) {
         title: "CompassAI",
         titleBarStyle: 'hiddenInset',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            webviewTag: true
+            nodeIntegration: false,
+            contextIsolation: true,
+            webviewTag: true,
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 

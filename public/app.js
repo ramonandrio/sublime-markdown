@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    if (typeof window.require !== 'undefined') {
+    if (window.api) {
         document.body.classList.add('electron-mode');
     }
 
@@ -178,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceIndicator.title = `Carpeta Local: ${currentLocalFolderHandle.name}`;
         } else if (currentNodeServer) {
             let folderName = 'Servidor Local';
-            if (typeof window.require !== 'undefined') {
+            if (window.api) {
                 const lastFolder = localStorage.getItem('pmos_last_folder');
                 if (lastFolder) {
                     const parts = lastFolder.split(/[/\\]/).filter(Boolean);
@@ -206,16 +206,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.title = formattedTitle;
 
-        if (typeof window.require !== 'undefined') {
+        if (window.api) {
             try {
-                const { ipcRenderer } = window.require('electron');
                 let representedPath = null;
                 if (currentNodeServer) {
                     representedPath = localStorage.getItem('pmos_last_folder');
                 }
-                ipcRenderer.send('set-window-title', { 
-                    title: formattedTitle, 
-                    path: representedPath 
+                window.api.setWindowTitle({
+                    title: formattedTitle,
+                    path: representedPath
                 });
             } catch (err) {
                 console.error('Error setting native window title via IPC', err);
@@ -398,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // En CompassAI nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
-            if (typeof window.require !== 'undefined' && currentLocalFolderHandle) {
+            if (window.api && currentLocalFolderHandle) {
                 currentLocalFolderHandle = null;
                 openTabs = []; // Evitamos pestañas rotas de sesiones pasadas
             }
@@ -441,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else if (currentNodeServer) {
                 // Si estamos en CompassAI (Electron nativo)
-                if (typeof window.require !== 'undefined') {
+                if (window.api) {
                     const lastFolder = localStorage.getItem('pmos_last_folder');
                     if (lastFolder) {
                         try {
@@ -573,9 +572,8 @@ document.addEventListener('DOMContentLoaded', () => {
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
             // 1. Detección primero para CompassAI (Electron)
-            if (typeof window.require !== 'undefined') {
-                const { ipcRenderer } = window.require('electron');
-                const folderPath = await ipcRenderer.invoke('select-folder');
+            if (window.api) {
+                const folderPath = await window.api.selectFolder();
 
                 if (!folderPath) return; // Usuario canceló el popup nativo de Mac
 
@@ -645,10 +643,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const workspaceName = await showCustomPrompt('Nombre del workspace (carpeta):', 'CompassAI');
             if (!workspaceName) return;
 
-            if (typeof window.require !== 'undefined') {
+            if (window.api) {
                 // Modo Electron (Nativo)
-                const { ipcRenderer } = window.require('electron');
-                const result = await ipcRenderer.invoke('create-compassai-workspace', workspaceName);
+                const result = await window.api.createCompassaiWorkspace(workspaceName);
 
                 if (!result.success) {
                     if (result.error !== 'Cancelado por el usuario') {
@@ -856,7 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Abrir Terminal (Solo Electron)
     const openTerminalMenuBtn = document.getElementById('openTerminalMenuBtn');
     const menuTerminalDropdown = document.getElementById('menuTerminalProfileDropdown');
-    if (openTerminalMenuBtn && typeof window.require !== 'undefined') {
+    if (openTerminalMenuBtn && window.api) {
         openTerminalMenuBtn.style.display = 'block';
         openTerminalMenuBtn.addEventListener('click', () => {
             if (window.terminalCtrl) {
@@ -914,9 +911,8 @@ document.addEventListener('DOMContentLoaded', () => {
         openFolderBtn.addEventListener('click', async () => {
             try {
                 // 1. Detección primero para CompassAI (Electron)
-                if (typeof window.require !== 'undefined') {
-                    const { ipcRenderer } = window.require('electron');
-                    const folderPath = await ipcRenderer.invoke('select-folder');
+                if (window.api) {
+                        const folderPath = await window.api.selectFolder();
 
                     if (!folderPath) return; // Usuario canceló el popup nativo de Mac
 
@@ -1015,9 +1011,8 @@ document.addEventListener('DOMContentLoaded', () => {
     sidebarOverlay.addEventListener('click', closeMobileSidebar);
 
     // Soft refresh: Cmd+R refresca árbol y documento activo, sin tocar terminales
-    if (typeof window.require !== 'undefined') {
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.on('soft-refresh', async () => {
+    if (window.api) {
+        window.api.onSoftRefresh(async () => {
             // 1. Refrescar árbol de archivos
             if (currentNodeServer) {
                 await renderNodeFolder();
@@ -1475,7 +1470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Abre un prototipo: levanta servidor estático y lo muestra en webview
     async function openPrototypeTab(folderPath, folderName) {
-        if (typeof window.require === 'undefined') return;
+        if (!window.api) return;
 
         const tabId = `proto:${folderPath}`;
         const existing = openTabs.find(t => t.id === tabId);
@@ -1483,8 +1478,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         showToast(`Levantando servidor para ${folderName}...`, 'info', 2000);
 
-        const { ipcRenderer } = window.require('electron');
-        const result = await ipcRenderer.invoke('proto-server-start', folderPath);
+        const result = await window.api.protoServerStart(folderPath);
 
         if (!result.ok) {
             showToast(`Error: ${result.error}`, 'warning', 4000);
@@ -1788,9 +1782,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Parar servidor de prototipo si lo tiene
-        if (tab && tab.protoFolderPath && typeof window.require !== 'undefined') {
-            const { ipcRenderer } = window.require('electron');
-            ipcRenderer.invoke('proto-server-stop', tab.protoFolderPath);
+        if (tab && tab.protoFolderPath && window.api) {
+            window.api.protoServerStop(tab.protoFolderPath);
         }
 
         // Si el tab está en un split group, deshacer ese split
@@ -3296,7 +3289,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // SETTINGS MODAL + CODA/NOTION PHASE 2 (API Key)
     // ============================================================
     (function () {
-        const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+        const api = window.api || null;
 
         const modal        = document.getElementById('settingsModal');
         const settingsBtn  = document.getElementById('settingsBtn');
@@ -3362,19 +3355,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ---- Coda API helper ----
         async function codaGet(apiPath, apiKey) {
-            if (!ipcRenderer) {
+            if (!api) {
                 // Fallback for non-Electron (dev): direct fetch (may fail CORS)
                 const r = await fetch(`https://coda.io/apis/v1${apiPath}`, {
                     headers: { 'Authorization': `Bearer ${apiKey}` }
                 });
                 return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
             }
-            return ipcRenderer.invoke('coda-api-request', { path: apiPath, apiKey });
+            return api.codaApiRequest({ path: apiPath, apiKey });
         }
 
         // ---- Notion API helper ----
         async function notionReq(apiPath, method = 'GET', body = null, apiKey) {
-            if (!ipcRenderer) {
+            if (!api) {
                 const r = await fetch(`https://api.notion.com/v1${apiPath}`, {
                     method,
                     headers: {
@@ -3386,7 +3379,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
             }
-            return ipcRenderer.invoke('notion-api-request', { path: apiPath, method, body, apiKey });
+            return api.notionApiRequest({ path: apiPath, method, body, apiKey });
         }
 
         // ---- Open / Close modal ----

@@ -485,10 +485,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
+    <!-- xterm + addons: UMD copia exports a window (Terminal, FitAddon, ...) -->
+    <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
+    <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+
     <!-- Módulos de la aplicación -->
-    <script src="github.js?v=2"></script>
-    <script src="chat.js?v=2"></script>
-    <script src="app.js?v=2"></script>
+    <script src="github.js?v=4"></script>
+    <script src="chat.js?v=4"></script>
+    <script src="app.js?v=4"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;">
