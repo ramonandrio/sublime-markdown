@@ -391,68 +391,6 @@ ipcMain.handle('select-file', async (event) => {
     return result.filePaths;
 });
 
-ipcMain.handle('create-compassai-workspace', async (event, workspaceName) => {
-    const senderId = event.sender.id;
-    const targetWindow = windowData.get(senderId)?.window;
-
-    const result = await dialog.showOpenDialog(targetWindow, {
-        properties: ['openDirectory', 'createDirectory'],
-        title: 'Selecciona dónde crear tu workspace CompassAI',
-        buttonLabel: 'Crear aquí'
-    });
-
-    if (!result || result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: 'Cancelado por el usuario' };
-    }
-
-    const parentDir = result.filePaths[0];
-
-    // Validar que el nombre no contiene separadores de ruta ni caracteres nulos
-    if (!workspaceName || /[/\\\0]/.test(workspaceName) || workspaceName === '.' || workspaceName === '..') {
-        return { success: false, error: 'Nombre de workspace inválido' };
-    }
-    const targetDir = path.join(parentDir, workspaceName);
-    // Verificar que el resultado final sigue dentro del directorio elegido
-    if (!targetDir.startsWith(parentDir + path.sep)) {
-        return { success: false, error: 'Nombre de workspace inválido' };
-    }
-
-    const templateDir = path.join(__dirname, 'templates', 'compassai');
-
-    const fs = require('fs');
-
-    // Helper function to recursively copy from asar to normal filesystem
-    function copyDirFromAsar(src, dest) {
-        if (!fs.existsSync(dest)) {
-            fs.mkdirSync(dest, { recursive: true });
-        }
-
-        const entries = fs.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-            const srcPath = path.join(src, entry.name);
-            const destPath = path.join(dest, entry.name);
-
-            if (entry.isDirectory()) {
-                copyDirFromAsar(srcPath, destPath);
-            } else {
-                fs.copyFileSync(srcPath, destPath);
-            }
-        }
-    }
-
-    try {
-        if (fs.existsSync(targetDir)) {
-            return { success: false, error: 'La carpeta ya existe' };
-        }
-
-        copyDirFromAsar(templateDir, targetDir);
-
-        return { success: true, path: targetDir };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
-});
-
 ipcMain.on('set-window-title', (event, data) => {
     const senderId = event.sender.id;
     const targetWindow = windowData.get(senderId)?.window;

@@ -61,7 +61,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Welcome screen
     const welcomeLocalBtn = document.getElementById('welcomeLocalBtn');
     const welcomeGitHubBtn = document.getElementById('welcomeGitHubBtn');
-    const welcomeCompassAIBtn = document.getElementById('welcomeCompassAIBtn');
     const githubRepoSelector = document.getElementById('githubRepoSelector');
     const githubUserInfo = document.getElementById('githubUserInfo');
     const repoSearchInput = document.getElementById('repoSearchInput');
@@ -638,93 +637,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // CompassAI
-    if (welcomeCompassAIBtn) {
-        welcomeCompassAIBtn.addEventListener('click', async () => {
-            const workspaceName = await showCustomPrompt('Nombre del workspace (carpeta):', 'CompassAI');
-            if (!workspaceName) return;
-
-            if (window.api) {
-                // Modo Electron (Nativo)
-                const result = await window.api.createCompassaiWorkspace(workspaceName);
-
-                if (!result.success) {
-                    if (result.error !== 'Cancelado por el usuario') {
-                        alert('Error: ' + result.error);
-                    }
-                    return;
-                }
-
-                await applyNewWorkspace(result.path);
-            } else {
-                // Modo Web (Fallback al backend normal)
-                try {
-                    const res = await fetch('/api/create-compassai-workspace', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ workspaceName })
-                    });
-
-                    const data = await res.json();
-
-                    if (res.ok && data.success) {
-                        await applyNewWorkspace(data.path);
-                    } else {
-                        alert('Error: ' + (data.error || 'Fallo desconocido'));
-                    }
-                } catch (err) {
-                    alert('Error de red al crear workspace: ' + err.message);
-                }
-            }
-        });
-    }
-
-    async function applyNewWorkspace(targetFolder) {
-        // Set as current folder
-        const res = await fetch('/api/set-root', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newRoot: targetFolder })
-        });
-
-        if (res.ok) {
-            currentGitHubRepo = null;
-            currentLocalFolderHandle = null;
-            currentNodeServer = true;
-            localStorage.setItem('pmos_last_folder', targetFolder);
-            showApp();
-            await renderNodeFolder();
-            saveWorkspaceState();
-
-            // Abrir automáticamente START-HERE.md
-            setTimeout(() => {
-                const fakeItem = {
-                    path: 'START-HERE.md',
-                    name: 'START-HERE.md',
-                    type: 'file'
-                };
-                openFileTab(fakeItem);
-            }, 300);
-
-            setTimeout(() => {
-                if (window.terminalCtrl && window.terminalCtrl.openTerminal) {
-                    // Abrir terminal y enviar el comando inicial de setup
-                    window.terminalCtrl.openTerminal();
-                    // Dar un pequeño margen para que el terminal se renderice y esté listo
-                    setTimeout(() => {
-                        const activeId = window.terminalCtrl.getActiveTerminalId();
-                        if (activeId) {
-                            window.terminalCtrl.sendInput(activeId, '/setup\r');
-                        }
-                    }, 1000);
-                } else {
-                    alert('Workspace creado. Abre el terminal de la app y ejecuta /setup para empezar.');
-                }
-            }, 500);
-        } else {
-            alert('Error al establecer la carpeta en CompassAI.');
-        }
-    }
-
     // Guardar Token
     saveTokenBtn.addEventListener('click', async () => {
         const token = tokenInput.value.trim();

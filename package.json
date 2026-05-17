@@ -23,7 +23,6 @@
       "terminal-manager.js",
       "shell-integration/**/*",
       "public/**/*",
-      "templates/**/*",
       "node_modules/**/*",
       "!node_modules/.cache/**/*",
       "!**/*.map",

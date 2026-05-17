@@ -8,7 +8,6 @@ contextBridge.exposeInMainWorld('api', {
     // ── Invoke (request/response) ────────────────────────────────────────────
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     selectFile:   () => ipcRenderer.invoke('select-file'),
-    createCompassaiWorkspace: (name) => ipcRenderer.invoke('create-compassai-workspace', name),
 
     keystoreGet:    (key)        => ipcRenderer.invoke('keystore-get', key),
     keystoreSet:    (key, value) => ipcRenderer.invoke('keystore-set', key, value),
