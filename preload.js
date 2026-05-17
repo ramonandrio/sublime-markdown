@@ -9,10 +9,6 @@ contextBridge.exposeInMainWorld('api', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     selectFile:   () => ipcRenderer.invoke('select-file'),
 
-    keystoreGet:    (key)        => ipcRenderer.invoke('keystore-get', key),
-    keystoreSet:    (key, value) => ipcRenderer.invoke('keystore-set', key, value),
-    keystoreRemove: (key)        => ipcRenderer.invoke('keystore-remove', key),
-
     codaApiRequest:   (payload) => ipcRenderer.invoke('coda-api-request', payload),
     notionApiRequest: (payload) => ipcRenderer.invoke('notion-api-request', payload),
 

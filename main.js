@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./server.js');
@@ -210,49 +210,6 @@ function setupMenu() {
     const menu = Menu.buildFromTemplate(template);
     Menu.setApplicationMenu(menu);
 }
-
-// === KEYSTORE (safeStorage) ===
-// Cifra valores sensibles con el keychain del sistema operativo.
-// Los datos cifrados se persisten en userData/keystore.json como base64.
-const KEYSTORE_PATH = path.join(app.getPath('userData'), 'keystore.json');
-
-function _readKeystore() {
-    try {
-        if (fs.existsSync(KEYSTORE_PATH)) return JSON.parse(fs.readFileSync(KEYSTORE_PATH, 'utf8'));
-    } catch {}
-    return {};
-}
-
-function _writeKeystore(store) {
-    // Escritura atómica: si el proceso muere a mitad de la escritura, el
-    // keystore.json original sigue intacto en lugar de quedar truncado.
-    const tmp = KEYSTORE_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
-    fs.renameSync(tmp, KEYSTORE_PATH);
-}
-
-ipcMain.handle('keystore-get', (event, key) => {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const store = _readKeystore();
-    if (!store[key]) return null;
-    try { return safeStorage.decryptString(Buffer.from(store[key], 'base64')); }
-    catch { return null; }
-});
-
-ipcMain.handle('keystore-set', (event, key, value) => {
-    if (!safeStorage.isEncryptionAvailable()) return false;
-    const store = _readKeystore();
-    store[key] = safeStorage.encryptString(value).toString('base64');
-    _writeKeystore(store);
-    return true;
-});
-
-ipcMain.handle('keystore-remove', (event, key) => {
-    const store = _readKeystore();
-    delete store[key];
-    _writeKeystore(store);
-    return true;
-});
 
 // Buffer de salida PTY por terminal.
 // Implementa DEC Synchronized Output (\x1b[?2026h / \x1b[?2026l):
