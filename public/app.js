@@ -694,25 +694,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Botón Home
-    const homeBtn = document.getElementById('homeBtn');
-    if (homeBtn) {
-        homeBtn.addEventListener('click', () => {
-            // Verificar si hay tabs dirty
-            const dirtyTabs = openTabs.filter(t => t.dirty);
-            if (dirtyTabs.length > 0) {
-                if (!confirm('Hay archivos con cambios sin guardar. ¿Volver al inicio?')) return;
-            }
-            openTabs = [];
-            activeTabId = null;
-            currentLocalFolderHandle = null;
-            currentNodeServer = false;
-            renderTabs();
-            showWelcomeScreen();
-            saveWorkspaceState();
-        });
-    }
-
     // Toggle Editor
     toggleSplitBtn.addEventListener('click', () => {
         isEditorOpen = !isEditorOpen;

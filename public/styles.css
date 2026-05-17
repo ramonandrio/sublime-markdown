@@ -945,54 +945,70 @@ body {
 .welcome-subtitle {
     color: var(--text-muted);
     font-size: 0.95rem;
-    margin-bottom: 32px;
+    margin-bottom: 20px;
 }
 
-.source-options {
-    display: flex;
-    gap: 16px;
+.welcome-bullets {
+    list-style: none;
+    padding: 0 0 0 60px;
+    margin: 0 auto 28px;
+    text-align: left;
+    display: inline-block;
+}
+
+.welcome-bullets li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.welcome-bullets li:last-child {
     margin-bottom: 0;
 }
 
-.source-btn {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
+.welcome-bullets li::before {
+    content: '•';
+    position: absolute;
+    left: 4px;
+    top: -1px;
+    color: var(--text-accent);
+    font-weight: 700;
+}
+
+.welcome-cta {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 24px 16px;
+    gap: 10px;
+    padding: 12px 28px;
     border: 1.5px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: 10px;
     background: white;
+    color: var(--text-primary);
     cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    font-family: inherit;
     transition: all 0.2s ease;
 }
 
-.source-btn:hover {
+.welcome-cta:hover {
     border-color: var(--text-accent);
     background: #f0f6ff;
-    transform: translateY(-2px);
+    color: var(--text-accent);
+    transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(9, 105, 218, 0.12);
 }
 
-.source-icon {
+.welcome-cta svg {
     color: var(--text-muted);
     transition: color 0.2s;
 }
 
-.source-btn:hover .source-icon {
+.welcome-cta:hover svg {
     color: var(--text-accent);
-}
-
-.source-title {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text-primary);
-}
-
-.source-desc {
-    font-size: 0.78rem;
-    color: var(--text-muted);
 }
 
 /* === MOBILE RESPONSIVE === */
@@ -1143,14 +1159,6 @@ body {
         width: 90vw !important;
         max-width: 400px;
         padding: 24px !important;
-    }
-
-    .source-options {
-        flex-direction: column !important;
-    }
-
-    .source-btn {
-        max-width: none !important;
     }
 
     /* Welcome title smaller */
