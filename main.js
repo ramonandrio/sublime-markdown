@@ -465,19 +465,19 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
 });
 
 // === TERMINAL NOTIFICATIONS ===
-ipcMain.on('terminal-notify', (event, { title, body }) => {
-    if (Notification.isSupported()) {
-        const n = new Notification({ title, body });
-        n.on('click', () => {
-            // Al hacer click en la notificación, enfocar la ventana
-            const win = BrowserWindow.fromWebContents(event.sender);
-            if (win) {
-                win.show();
-                win.focus();
-            }
-        });
-        n.show();
-    }
+// El paneId viaja end-to-end (renderer → main → notif → click → renderer)
+// para que al clicar la notif aterricemos en la pestaña + pane exactos.
+ipcMain.on('terminal-notify', (event, { paneId, title, body }) => {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title, body });
+    n.on('click', () => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win) { win.show(); win.focus(); }
+        if (paneId && !event.sender.isDestroyed()) {
+            event.sender.send('focus-pane', { paneId });
+        }
+    });
+    n.show();
 });
 
 // === PROTOTYPE SERVER (servir carpetas como servidor estático) ===

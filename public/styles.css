@@ -1473,6 +1473,93 @@ body {
     vertical-align: middle;
 }
 
+/* Toast in-app: aviso de pane idle cuando la app tiene foco. Reemplaza a la
+   notificación nativa macOS cuando estás dentro de la app. */
+.notif-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 360px;
+    padding: 12px 14px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    font-family: var(--font-ui);
+    animation: notif-toast-in 0.2s ease-out;
+}
+
+@keyframes notif-toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.notif-toast-text {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.notif-toast-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notif-toast-body {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notif-toast-action {
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-accent);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.notif-toast-action:hover {
+    background: #f0f6ff;
+    border-color: var(--text-accent);
+}
+
+.notif-toast-close {
+    font-family: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.notif-toast-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
 .terminal-tab.active {
     background-color: var(--bg-darker);
     color: var(--text-primary);

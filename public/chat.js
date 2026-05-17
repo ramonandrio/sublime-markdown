@@ -287,6 +287,9 @@ class TerminalController {
             // El PTY terminó inesperadamente
             if (this.panes.has(id)) this.closePane(id);
         });
+
+        // Click en la notificación nativa → enfocamos el pane que la disparó
+        this.api.onFocusPane?.(({ paneId }) => this._focusPane(paneId));
     }
 
     // ── Idle detector: la pestaña no ha recibido output en IDLE_MS ────────────
@@ -294,19 +297,25 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (!pane || !pane._hadOutputEver || pane._notified) return;
 
-        // No notificar si el usuario ya está mirando este terminal
-        const focused = document.hasFocus()
+        // El usuario ya está en este pane: no hace falta ningún aviso.
+        const paneFocused = document.hasFocus()
             && pane.term?.textarea === document.activeElement;
-        if (focused) return;
+        if (paneFocused) return;
 
         pane._notified = true;
         const tab = this.tabs.get(pane.tabId);
         tab?.tabBtn.classList.add('needs-attention');
 
-        this.api?.terminalNotify({
-            title: `${this._notificationName(pane)} — listo`,
-            body: 'El terminal está esperando tu respuesta'
-        });
+        const title = `${this._notificationName(pane)} — listo`;
+        const body  = 'El terminal está esperando tu respuesta';
+
+        if (document.hasFocus()) {
+            // App abierta pero en otro pane → toast in-app (sin disrupción macOS)
+            this._showToast(ptyId, title, body);
+        } else {
+            // App oculta o sin foco → notif nativa macOS
+            this.api?.terminalNotify({ paneId: ptyId, title, body });
+        }
     }
 
     // Nombre legible para la notificación: prioriza el nombre de la pestaña
@@ -318,6 +327,57 @@ class TerminalController {
         if (tabName && tabName !== 'Terminal') return tabName;
         const paneTitle = pane.leafNode?.el?.querySelector('.pane-title')?.textContent?.trim();
         return paneTitle || 'Terminal';
+    }
+
+    // Saltar al pane exacto que disparó una notificación (click en notif/toast).
+    _focusPane(ptyId) {
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+        this.switchTab(pane.tabId);
+        this._setActiveLeaf(pane.tabId, ptyId);
+        try { pane.term?.focus(); } catch (_) {}
+    }
+
+    // Toast in-app: aviso visible pero no invasivo cuando la app tiene foco
+    // pero el pane idle no es el activo. Un único slot — toasts nuevos
+    // reemplazan al anterior. Auto-dismiss a los 5s.
+    _showToast(ptyId, title, body) {
+        document.querySelectorAll('.notif-toast').forEach(t => t.remove());
+
+        const toast = document.createElement('div');
+        toast.className = 'notif-toast';
+
+        const text = document.createElement('div');
+        text.className = 'notif-toast-text';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'notif-toast-title';
+        titleEl.textContent = title;
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'notif-toast-body';
+        bodyEl.textContent = body;
+        text.appendChild(titleEl);
+        text.appendChild(bodyEl);
+
+        const action = document.createElement('button');
+        action.className = 'notif-toast-action';
+        action.textContent = 'Ir →';
+
+        const close = document.createElement('button');
+        close.className = 'notif-toast-close';
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Cerrar');
+
+        toast.appendChild(text);
+        toast.appendChild(action);
+        toast.appendChild(close);
+
+        const goToPane = () => { this._focusPane(ptyId); toast.remove(); };
+        text.addEventListener('click', goToPane);
+        action.addEventListener('click', goToPane);
+        close.addEventListener('click', (e) => { e.stopPropagation(); toast.remove(); });
+
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     }
 
     // ── Atajos de teclado ─────────────────────────────────────────────────────
@@ -1324,11 +1384,14 @@ class TerminalController {
         const cmdText = info.command || 'Comando';
         const seconds = (info.duration / 1000).toFixed(0);
         const status = info.exitCode === 0 ? '✓ Completado' : `✗ Error (código ${info.exitCode})`;
+        const title = `${this._notificationName(pane)} — ${status}`;
+        const body  = `$ ${cmdText}  ·  ${seconds}s`;
 
-        this.api?.terminalNotify({
-            title: `${this._notificationName(pane)} — ${status}`,
-            body: `$ ${cmdText}  ·  ${seconds}s`
-        });
+        if (document.hasFocus()) {
+            this._showToast(ptyId, title, body);
+        } else {
+            this.api?.terminalNotify({ paneId: ptyId, title, body });
+        }
     }
 
     // ── Marcar leaf como activo (foco visual) ─────────────────────────────────

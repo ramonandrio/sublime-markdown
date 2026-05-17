@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
     onTerminalOutput: (cb) => ipcRenderer.on('terminal-output', (_event, payload) => cb(payload)),
     onTerminalExit:   (cb) => ipcRenderer.on('terminal-exit',   (_event, payload) => cb(payload)),
     onSoftRefresh:    (cb) => ipcRenderer.on('soft-refresh',    () => cb()),
+    onFocusPane:      (cb) => ipcRenderer.on('focus-pane',      (_event, payload) => cb(payload)),
 
     // ── Helpers no-IPC ───────────────────────────────────────────────────────
     // webUtils.getPathForFile(file) — devuelve la ruta absoluta de un File
