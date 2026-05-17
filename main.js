@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./server.js');
@@ -58,6 +58,21 @@ async function createWindow(initialDir) {
             if (devToolsShortcut) event.preventDefault();
         });
     }
+
+    // Redirigir links externos (http/https) al navegador del SO en lugar de
+    // dejar que Electron abra una BrowserWindow nueva. Cubre cualquier
+    // window.open o <a target="_blank"> en cualquier parte del renderer.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        try {
+            const u = new URL(url);
+            if (u.protocol === 'http:' || u.protocol === 'https:') {
+                shell.openExternal(url);
+                return { action: 'deny' };
+            }
+        } catch {}
+        // blob:, file:, about:blank, etc. — se mantienen dentro de Electron
+        return { action: 'allow' };
+    });
 
     mainWindow.loadURL(`http://localhost:${port}`);
     return mainWindow;
@@ -346,6 +361,21 @@ ipcMain.handle('select-file', async (event) => {
         return null;
     }
     return result.filePaths;
+});
+
+// Abrir URLs externas en el navegador por defecto del sistema. Validamos
+// protocolo para no exponer file:/javascript:/protocolos custom a través
+// del bridge — sólo http(s).
+ipcMain.handle('open-external', async (event, url) => {
+    if (typeof url !== 'string') return false;
+    try {
+        const u = new URL(url);
+        if (u.protocol === 'http:' || u.protocol === 'https:') {
+            await shell.openExternal(url);
+            return true;
+        }
+    } catch {}
+    return false;
 });
 
 ipcMain.on('set-window-title', (event, data) => {

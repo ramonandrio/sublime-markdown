@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('api', {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
     selectFile:   () => ipcRenderer.invoke('select-file'),
 
+    // Abre una URL externa (http/https) en el navegador por defecto del SO.
+    // Otros protocolos devuelven false sin abrir nada.
+    openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
     codaApiRequest:   (payload) => ipcRenderer.invoke('coda-api-request', payload),
     notionApiRequest: (payload) => ipcRenderer.invoke('notion-api-request', payload),
 

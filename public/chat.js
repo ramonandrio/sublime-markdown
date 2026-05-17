@@ -603,7 +603,12 @@ class TerminalController {
         const fit = new FitAddon();
         term.loadAddon(fit);
         if (WebLinksAddon) {
-            term.loadAddon(new WebLinksAddon());
+            // Handler explícito: en lugar del window.open default (que en
+            // Electron abre una BrowserWindow nueva, a veces problemática),
+            // delega al navegador por defecto del SO vía preload.
+            term.loadAddon(new WebLinksAddon((event, uri) => {
+                window.api?.openExternal(uri);
+            }));
         }
         term.open(termEl);
 
