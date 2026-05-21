@@ -13,18 +13,24 @@ let Terminal, FitAddon, WebglAddon, WebLinksAddon;
 
 function loadTerminalLibs() {
     if (Terminal) return true;
-    try {
-        if (typeof window.require !== 'undefined') {
-            const xterm = window.require('@xterm/xterm');
-            Terminal = xterm.Terminal || xterm;
-            FitAddon = window.require('@xterm/addon-fit').FitAddon;
-            try { WebglAddon = window.require('@xterm/addon-webgl').WebglAddon; } catch (_) {}
-            try { WebLinksAddon = window.require('@xterm/addon-web-links').WebLinksAddon; } catch (_) {}
-            return !!Terminal;
-        }
-    } catch (e) { console.error('Error xterm libs:', e); }
-    return false;
+    // xterm + addons se cargan como <script> en index.html y exponen sus
+    // clases en window vía el wrapper UMD. xterm.js expone Terminal
+    // directo; los addons envuelven en { __esModule, FitAddon: class } —
+    // hay que desempaquetar la clase real.
+    Terminal      = window.Terminal;
+    FitAddon      = window.FitAddon?.FitAddon         || window.FitAddon;
+    WebglAddon    = window.WebglAddon?.WebglAddon     || window.WebglAddon;
+    WebLinksAddon = window.WebLinksAddon?.WebLinksAddon || window.WebLinksAddon;
+    return !!Terminal;
 }
+
+// Idle detector: cuántos ms sin output cuentan como "el terminal terminó
+// de hablar y espera tu respuesta". 8s es robusto: los CLIs LLM emiten su
+// status bar cada 1-2s mientras piensan, así que no genera falsos positivos.
+const IDLE_MS = 8000;
+
+// Threshold para notificar la finalización de comandos shell (vía OSC 633 D).
+const COMMAND_DURATION_THRESHOLD_MS = 5000;
 
 // Perfiles de arranque para terminales
 const PANE_PROFILES = [
@@ -173,9 +179,9 @@ class TerminalController {
         this.activeTabId = null;
         this._skipNotify = false;
 
-        const electron = (typeof window.require !== 'undefined') ? window.require('electron') : {};
-        this.ipcRenderer = electron.ipcRenderer || null;
-        this.webUtils = electron.webUtils || null;
+        // window.api viene de preload.js (contextBridge). En modo navegador puro
+        // (npm start sin Electron) no existe, así que se mantiene el null check.
+        this.api = window.api || null;
 
         // Callback para comunicación bidireccional con app.js
         this.onTerminalActivated = null;
@@ -248,13 +254,12 @@ class TerminalController {
 
     // ── IPC ──────────────────────────────────────────────────────────────────
     _initIpc() {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
 
-        this.ipcRenderer.on('terminal-output', (event, { id, data }) => {
+        this.api.onTerminalOutput(({ id, data }) => {
             const pane = this.panes.get(id);
             if (!pane) return;
             pane._writeBuf = (pane._writeBuf || '') + data;
-            pane._recentOutput = ((pane._recentOutput || '') + data).slice(-2000);
             // Debounce: reiniciamos el timer con cada chunk nuevo para acumular
             // todo un ciclo de actualización de Gemini (cursor move + clear + redraw + status bar)
             // antes de escribir. El wrap con ESC[?2026h/l hace el render atómico en xterm.js v6.
@@ -266,67 +271,113 @@ class TerminalController {
                 pane.term.write('\x1b[?2026h' + buf + '\x1b[?2026l');
             }, 16);
 
-            // Detección de caída de output: para procesos interactivos (Claude, etc.)
-            // Status bar updates: 58-103 bytes. Respuesta real: >200 bytes.
-            const significantOutput = data.length > 200;
-            if (significantOutput) {
-                const now = Date.now();
-                if (!pane._activityStart) pane._activityStart = now;
-                pane._lastSignificantOutput = now;
-                if (!this._isLLMProcess(this._getProcessType(pane))) {
-                    pane._activityNotified = false;
-                }
+            // Idle-detector: cualquier chunk de output cuenta como actividad.
+            // Los CLIs LLM emiten su status bar cada 1-2s mientras piensan, así
+            // que "no hubo output en IDLE_MS" es señal limpia de "terminó".
+            // NO reseteamos _notified aquí: heartbeats periódicos (status bar
+            // de Claude esperando input) no deben re-disparar la notificación.
+            // Sólo el input del usuario (onData) o el cierre del pane lo limpian.
+            pane._hadOutputEver = true;
 
-                // Indicador visual de actividad en la pestaña
-                const tab = this.tabs.get(pane.tabId);
-                const processType = this._getProcessType(pane);
-                pane._processType = processType;
-                const thinkingClass = this._getSpinnerClass(processType);
-                if (tab) {
-                    tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
-                    tab.tabBtn.classList.add(thinkingClass);
-                }
-
-                // Timer: si no hay output significativo en 8s, la respuesta terminó
-                if (pane._silenceTimer) clearTimeout(pane._silenceTimer);
-                const silenceMs = this._isLLMProcess(processType) ? 20000 : 8000;
-                pane._silenceTimer = setTimeout(() => {
-                    const activityDuration = (pane._lastSignificantOutput || now) - pane._activityStart;
-                    const isLLM = this._isLLMProcess(pane._processType);
-
-                    if (pane._activityNotified) return;
-
-                    pane._silenceTimer = null;
-                    pane._activityNotified = true;
-
-                    // Actualizar indicador visual
-                    if (tab) {
-                        tab.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
-                        if (isLLM && this._needsUserAction(pane._recentOutput || '')) {
-                            tab.tabBtn.classList.add('claude-waiting');
-                        }
-                    }
-
-                    // LLM: nunca notificar desde el silence timer (solo vía OSC 633 D)
-                    // Terminal normal: notificar tras silencio como antes
-                    if (!isLLM) {
-                        pane._activityStart = null;
-                        if (activityDuration >= 5000) {
-                            this._onCommandFinished(id, {
-                                command: pane.shellState?.currentCommand || 'Respuesta completada',
-                                exitCode: 0,
-                                duration: activityDuration
-                            });
-                        }
-                    }
-                }, silenceMs);
-            }
+            if (pane._idleTimer) clearTimeout(pane._idleTimer);
+            pane._idleTimer = setTimeout(() => this._onPaneIdle(id), IDLE_MS);
         });
 
-        this.ipcRenderer.on('terminal-exit', (event, { id }) => {
+        this.api.onTerminalExit(({ id }) => {
             // El PTY terminó inesperadamente
             if (this.panes.has(id)) this.closePane(id);
         });
+
+        // Click en la notificación nativa → enfocamos el pane que la disparó
+        this.api.onFocusPane?.(({ paneId }) => this._focusPane(paneId));
+    }
+
+    // ── Idle detector: la pestaña no ha recibido output en IDLE_MS ────────────
+    _onPaneIdle(ptyId) {
+        const pane = this.panes.get(ptyId);
+        if (!pane || !pane._hadOutputEver || pane._notified) return;
+
+        // El usuario ya está en este pane: no hace falta ningún aviso.
+        const paneFocused = document.hasFocus()
+            && pane.term?.textarea === document.activeElement;
+        if (paneFocused) return;
+
+        pane._notified = true;
+        const tab = this.tabs.get(pane.tabId);
+        tab?.tabBtn.classList.add('needs-attention');
+
+        const title = `${this._notificationName(pane)} — listo`;
+        const body  = 'El terminal está esperando tu respuesta';
+
+        if (document.hasFocus()) {
+            // App abierta pero en otro pane → toast in-app (sin disrupción macOS)
+            this._showToast(ptyId, title, body);
+        } else {
+            // App oculta o sin foco → notif nativa macOS
+            this.api?.terminalNotify({ paneId: ptyId, title, body });
+        }
+    }
+
+    // Nombre legible para la notificación: prioriza el nombre de la pestaña
+    // (si el usuario lo renombró) y cae al título del pane (que para perfiles
+    // suele ser "Claude"/"Gemini"/"ChatGPT") como fallback útil.
+    _notificationName(pane) {
+        const tab = this.tabs.get(pane.tabId);
+        const tabName = tab?.tabBtn.querySelector('.terminal-tab-name')?.textContent?.trim();
+        if (tabName && tabName !== 'Terminal') return tabName;
+        const paneTitle = pane.leafNode?.el?.querySelector('.pane-title')?.textContent?.trim();
+        return paneTitle || 'Terminal';
+    }
+
+    // Saltar al pane exacto que disparó una notificación (click en notif/toast).
+    _focusPane(ptyId) {
+        const pane = this.panes.get(ptyId);
+        if (!pane) return;
+        this.switchTab(pane.tabId);
+        this._setActiveLeaf(pane.tabId, ptyId);
+        try { pane.term?.focus(); } catch (_) {}
+    }
+
+    // Toast in-app: aviso visible pero no invasivo cuando la app tiene foco
+    // pero el pane idle no es el activo. Un único slot — toasts nuevos
+    // reemplazan al anterior. Auto-dismiss a los 5s.
+    _showToast(ptyId, title, body) {
+        document.querySelectorAll('.notif-toast').forEach(t => t.remove());
+
+        const toast = document.createElement('div');
+        toast.className = 'notif-toast';
+
+        const text = document.createElement('div');
+        text.className = 'notif-toast-text';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'notif-toast-title';
+        titleEl.textContent = title;
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'notif-toast-body';
+        bodyEl.textContent = body;
+        text.appendChild(titleEl);
+        text.appendChild(bodyEl);
+
+        const action = document.createElement('button');
+        action.className = 'notif-toast-action';
+        action.textContent = 'Ir →';
+
+        const close = document.createElement('button');
+        close.className = 'notif-toast-close';
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Cerrar');
+
+        toast.appendChild(text);
+        toast.appendChild(action);
+        toast.appendChild(close);
+
+        const goToPane = () => { this._focusPane(ptyId); toast.remove(); };
+        text.addEventListener('click', goToPane);
+        action.addEventListener('click', goToPane);
+        close.addEventListener('click', (e) => { e.stopPropagation(); toast.remove(); });
+
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     }
 
     // ── Atajos de teclado ─────────────────────────────────────────────────────
@@ -389,7 +440,7 @@ class TerminalController {
     // ── Crear nueva pestaña con un único pane ─────────────────────────────────
     async createTab(options = {}) {
         if (!loadTerminalLibs()) return;
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
 
         // Auto-vincular con el archivo activo (igual que antes)
         if (!options.fileId && window.app?.getActiveTabId) {
@@ -518,7 +569,7 @@ class TerminalController {
         this.resizer.style.display = 'block';
 
         // Lanzar PTY
-        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) { this.closeTab(tabId); return; }
 
         // Crear nodo hoja y montarlo
@@ -605,7 +656,12 @@ class TerminalController {
         const fit = new FitAddon();
         term.loadAddon(fit);
         if (WebLinksAddon) {
-            term.loadAddon(new WebLinksAddon());
+            // Handler explícito: en lugar del window.open default (que en
+            // Electron abre una BrowserWindow nueva, a veces problemática),
+            // delega al navegador por defecto del SO vía preload.
+            term.loadAddon(new WebLinksAddon((event, uri) => {
+                window.api?.openExternal(uri);
+            }));
         }
         term.open(termEl);
 
@@ -790,31 +846,19 @@ class TerminalController {
             switch (type) {
                 case 'A': // Prompt start
                     break;
-                case 'C': { // Command executed (preexec)
+                case 'C': // Command executed (preexec)
                     shellState.commandRunning = true;
                     shellState.commandStartTime = Date.now();
-                    // Mostrar spinner en la pestaña (tipo correcto según comando)
-                    const pC = this.panes.get(ptyId);
-                    const tC = this.tabs.get(pC?.tabId);
-                    if (tC && pC) {
-                        const spinnerClass = this._getSpinnerClass(this._getProcessType(pC));
-                        tC.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
-                        tC.tabBtn.classList.add(spinnerClass);
-                    }
                     break;
-                }
                 case 'D': { // Command finished (precmd) — D;exitCode
                     if (!shellState.commandRunning) break;
                     const exitCode = parseInt(parts[1] || '0', 10);
                     const duration = Date.now() - (shellState.commandStartTime || Date.now());
-                    // Cancelar timer de silencio para evitar doble notificación
+                    // Cancelar idle timer para evitar doble notificación
+                    // (la rica de OSC 633 D + la genérica de idle).
                     const p = this.panes.get(ptyId);
-                    if (p?._silenceTimer) { clearTimeout(p._silenceTimer); p._silenceTimer = null; }
-                    p._activityStart = null;
-                    p._activityNotified = false;
-                    // Quitar indicador visual de la pestaña
-                    const t = this.tabs.get(p?.tabId);
-                    if (t) t.tabBtn.classList.remove('claude-thinking', 'terminal-busy', 'claude-waiting', 'gemini-thinking', 'openai-thinking');
+                    if (p?._idleTimer) { clearTimeout(p._idleTimer); p._idleTimer = null; }
+                    if (p) p._notified = true;
                     this._onCommandFinished(ptyId, {
                         command: shellState.currentCommand,
                         exitCode,
@@ -832,7 +876,20 @@ class TerminalController {
             return true; // handled, don't render
         });
 
-        term.onData(input => this.ipcRenderer?.send('terminal-input', { id: ptyId, input }));
+        term.onData(input => this.api?.terminalInput(ptyId, input));
+
+        // onKey solo dispara para keystrokes reales, NO para mouse tracking
+        // (Claude/Gemini activan tracking de ratón y los clicks se convierten
+        // en bytes que onData verá pero onKey no). Aquí marcamos "nuevo turno":
+        // el usuario está escribiendo de verdad, permitimos la próxima
+        // notificación de idle.
+        term.onKey(() => {
+            const p = this.panes.get(ptyId);
+            if (p?._notified) {
+                p._notified = false;
+                this.tabs.get(p.tabId)?.tabBtn.classList.remove('needs-attention');
+            }
+        });
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
             _writeBuf: '', _writeTimer: null, shellState, themeName: 'Basic',
@@ -1002,9 +1059,9 @@ class TerminalController {
             el.classList.remove('pane-drop-target');
 
             // 1. File.path — propiedad de Electron en objetos File del SO
-            if (e.dataTransfer.files?.length > 0 && this.webUtils) {
+            if (e.dataTransfer.files?.length > 0 && this.api) {
                 const paths = Array.from(e.dataTransfer.files)
-                    .map(f => this.webUtils.getPathForFile(f))
+                    .map(f => this.api.getPathForFile(f))
                     .filter(Boolean);
                 if (paths.length > 0) { this._sendPathToPane(ptyId, ...paths); return; }
             }
@@ -1043,16 +1100,16 @@ class TerminalController {
         // propia ruta se cierran, escapan con \' y se vuelven a abrir.
         const shellEscape = p => "'" + p.replace(/'/g, "'\\''") + "'";
         const text = paths.map(shellEscape).join(' ');
-        this.ipcRenderer?.send('terminal-input', { id: ptyId, input: text });
+        this.api?.terminalInput(ptyId, text);
     }
 
     // ── Attach desde picker nativo (botón toolbarAttachBtn) ──────────────────
     async _attachFilesFromPicker() {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
         const activeId = this.getActiveTerminalId();
         if (!activeId) return;
 
-        const filePaths = await this.ipcRenderer.invoke('select-file');
+        const filePaths = await this.api.selectFile();
         if (!filePaths || filePaths.length === 0) return;
 
         this._sendPathToPane(activeId, ...filePaths);
@@ -1117,7 +1174,7 @@ class TerminalController {
         if (!profile?.command) return;
         // Pequeño delay para que el shell esté listo
         setTimeout(() => {
-            this.ipcRenderer?.send('terminal-input', { id: ptyId, input: profile.command + '\n' });
+            this.api?.terminalInput(ptyId, profile.command + '\n');
         }, 300);
         // Actualizar título del pane
         const pane = this.panes.get(ptyId);
@@ -1129,7 +1186,7 @@ class TerminalController {
 
     // ── Dividir un pane ───────────────────────────────────────────────────────
     async splitPane(ptyId, dir, options = {}) {
-        if (!this.ipcRenderer) return;
+        if (!this.api) return;
         const pane = this.panes.get(ptyId);
         if (!pane) return;
         const tab = this.tabs.get(pane.tabId);
@@ -1138,7 +1195,7 @@ class TerminalController {
         const oldLeaf = pane.leafNode;
 
         // Lanzar nuevo PTY
-        const ptyRes = await this.ipcRenderer.invoke('terminal-start', { cwd: null });
+        const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) return;
 
         const newLeaf = this._makeLeafNode(ptyRes.id, pane.tabId);
@@ -1202,7 +1259,7 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (!pane) return;
 
-        this.ipcRenderer?.send('terminal-kill', { id: ptyId });
+        this.api?.terminalKill(ptyId);
         pane.term.dispose();
         // Limpiar listener del theme dropdown
         if (pane.leafNode.el._themeCleanup) pane.leafNode.el._themeCleanup();
@@ -1259,7 +1316,7 @@ class TerminalController {
         [...this.panes.values()]
             .filter(p => p.tabId === tabId)
             .forEach(p => {
-                this.ipcRenderer?.send('terminal-kill', { id: p.ptyId });
+                this.api?.terminalKill(p.ptyId);
                 p.term.dispose();
                 this.panes.delete(p.ptyId);
             });
@@ -1307,66 +1364,33 @@ class TerminalController {
         }
     }
 
-    // ── Clasificación de proceso (terminal vs LLM) ─────────────────────────────
-    _getProcessType(pane) {
-        if (pane._profileId && pane._profileId !== 'terminal') return pane._profileId;
-        const cmd = (pane.shellState?.currentCommand || '').trim().toLowerCase();
-        if (!cmd) return 'terminal';
-        for (const p of PANE_PROFILES) {
-            if (p.id === 'terminal') continue;
-            if (cmd.startsWith(p.id) || cmd.startsWith(p.id + ' ')) return p.id;
-            if (p.command) {
-                const cmdWord = p.command.split(/\s+/).pop().split('/').pop().toLowerCase();
-                if (cmd.startsWith(cmdWord)) return p.id;
-            }
-        }
-        return 'terminal';
-    }
-
-    _getSpinnerClass(processType) {
-        switch (processType) {
-            case 'claude': return 'claude-thinking';
-            case 'gemini': return 'gemini-thinking';
-            case 'openai': return 'openai-thinking';
-            default: return 'terminal-busy';
-        }
-    }
-
-    _isLLMProcess(processType) {
-        return processType !== 'terminal';
-    }
-
-    // ── Detectar si Claude necesita acción del usuario ─────────────────────────
-    _needsUserAction(rawOutput) {
-        const clean = rawOutput.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                               .replace(/\x1b\][^\x07]*\x07/g, '')
-                               .replace(/\x1b\].*?\x1b\\/g, '');
-        return /Do you want to proceed|Enter to select|Esc to cancel|yes\/no|\(y\/n\)|allow|deny|approve|reject|permission|tool use|want to allow|press enter|waiting for|confirm/i.test(clean);
-    }
-
-    // ── Notificación cuando un comando largo termina ──────────────────────────
+    // ── Notificación cuando un comando shell largo termina (OSC 633 D) ───────
     _onCommandFinished(ptyId, info) {
-        const THRESHOLD_MS = 5000; // 5 segundos
-        if (!info || info.duration < THRESHOLD_MS) return;
+        if (!info || info.duration < COMMAND_DURATION_THRESHOLD_MS) return;
 
-        // Solo notificar si el terminal no tiene el foco
         const pane = this.panes.get(ptyId);
         if (!pane) return;
-        const termHasFocus = pane.term.textarea === document.activeElement;
+
+        // Añadir badge "needs-attention" siempre que el comando dure ≥ threshold,
+        // incluso si la pestaña tiene foco. Así el usuario que volvió a la app
+        // ve el aviso visual en la pestaña.
+        const tab = this.tabs.get(pane.tabId);
+        tab?.tabBtn.classList.add('needs-attention');
+
+        // La notificación nativa solo si el terminal no tiene el foco
+        const termHasFocus = pane.term?.textarea === document.activeElement;
         if (document.hasFocus() && termHasFocus) return;
 
-        // Info del pane y tab
-        const paneName = pane.leafNode?.el?.querySelector('.pane-title')?.textContent || 'Terminal';
         const cmdText = info.command || 'Comando';
         const seconds = (info.duration / 1000).toFixed(0);
         const status = info.exitCode === 0 ? '✓ Completado' : `✗ Error (código ${info.exitCode})`;
+        const title = `${this._notificationName(pane)} — ${status}`;
+        const body  = `$ ${cmdText}  ·  ${seconds}s`;
 
-        const notifData = {
-            title: `${paneName} — ${status}`,
-            body: `$ ${cmdText}  ·  ${seconds}s`
-        };
-        if (this.ipcRenderer) {
-            this.ipcRenderer.send('terminal-notify', notifData);
+        if (document.hasFocus()) {
+            this._showToast(ptyId, title, body);
+        } else {
+            this.api?.terminalNotify({ paneId: ptyId, title, body });
         }
     }
 
@@ -1380,6 +1404,15 @@ class TerminalController {
         this._walkLeaves(tab.rootNode, (leaf) => {
             leaf.el.classList.toggle('pane-leaf-active', leaf.ptyId === ptyId);
         });
+
+        // El usuario miró este pane: ocultamos el badge, pero NO reseteamos
+        // _notified. Así, si Claude sigue emitiendo heartbeats mientras espera
+        // input, no volvemos a notificar. Sólo el input real del usuario
+        // (onData) inicia un turno nuevo y permite la próxima notificación.
+        const pane = this.panes.get(ptyId);
+        if (pane?._notified) {
+            tab.tabBtn.classList.remove('needs-attention');
+        }
     }
 
     // ── Resizer entre panes ───────────────────────────────────────────────────
@@ -1447,11 +1480,7 @@ class TerminalController {
         try {
             pane.fit.fit();
             if (notifyPty) {
-                this.ipcRenderer?.send('terminal-resize', {
-                    id:   leafNode.ptyId,
-                    cols: pane.term.cols,
-                    rows: pane.term.rows
-                });
+                this.api?.terminalResize(leafNode.ptyId, pane.term.cols, pane.term.rows);
             }
         } catch (_) {}
     }
@@ -1552,7 +1581,7 @@ class TerminalController {
     // ── API pública (usada por app.js) ────────────────────────────────────────
     openTerminal(options)    { return this.createTab(options); }
     getActiveTerminalId()    { return this.tabs.get(this.activeTabId)?.activeLeafPtyId ?? null; }
-    sendInput(id, data)      { this.ipcRenderer?.send('terminal-input', { id, input: data }); }
+    sendInput(id, data)      { this.api?.terminalInput(id, data); }
 
     activateTerminalForFile(fileId) {
         for (const [tabId, tab] of this.tabs) {

@@ -148,29 +148,6 @@ function createServer(initialDir) {
         res.json({ success: true, rootDir: ROOT_DIR });
     });
 
-    app.post('/api/create-compassai-workspace', (req, res) => {
-        const { workspaceName } = req.body;
-        if (!workspaceName) return res.status(400).json({ error: 'Falta el nombre del workspace' });
-
-        // Crea el workspace como carpeta hermana al ROOT_DIR actual por defecto para la versión web
-        const parentDir = path.resolve(ROOT_DIR, '..');
-        const targetDir = path.join(parentDir, workspaceName);
-        const templateDir = path.join(__dirname, 'templates', 'compassai');
-
-        try {
-            if (fs.existsSync(targetDir)) {
-                return res.status(400).json({ error: 'La carpeta ya existe' });
-            }
-            if (!fs.existsSync(templateDir)) {
-                return res.status(500).json({ error: 'La plantilla no existe en el servidor' });
-            }
-            fs.cpSync(templateDir, targetDir, { recursive: true });
-            res.json({ success: true, path: targetDir });
-        } catch (err) {
-            res.status(500).json({ error: 'Error al crear la plantilla', details: err.message });
-        }
-    });
-
     // Provide the getter on the instance to query the state from main.js
     app.getRootDir = () => ROOT_DIR;
 

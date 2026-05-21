@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createServer } = require('./server.js');
@@ -24,9 +24,10 @@ async function createWindow(initialDir) {
         title: "CompassAI",
         titleBarStyle: 'hiddenInset',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            webviewTag: true
+            nodeIntegration: false,
+            contextIsolation: true,
+            webviewTag: true,
+            preload: path.join(__dirname, 'preload.js')
         }
     });
 
@@ -57,6 +58,21 @@ async function createWindow(initialDir) {
             if (devToolsShortcut) event.preventDefault();
         });
     }
+
+    // Redirigir links externos (http/https) al navegador del SO en lugar de
+    // dejar que Electron abra una BrowserWindow nueva. Cubre cualquier
+    // window.open o <a target="_blank"> en cualquier parte del renderer.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        try {
+            const u = new URL(url);
+            if (u.protocol === 'http:' || u.protocol === 'https:') {
+                shell.openExternal(url);
+                return { action: 'deny' };
+            }
+        } catch {}
+        // blob:, file:, about:blank, etc. — se mantienen dentro de Electron
+        return { action: 'allow' };
+    });
 
     mainWindow.loadURL(`http://localhost:${port}`);
     return mainWindow;
@@ -210,49 +226,6 @@ function setupMenu() {
     Menu.setApplicationMenu(menu);
 }
 
-// === KEYSTORE (safeStorage) ===
-// Cifra valores sensibles con el keychain del sistema operativo.
-// Los datos cifrados se persisten en userData/keystore.json como base64.
-const KEYSTORE_PATH = path.join(app.getPath('userData'), 'keystore.json');
-
-function _readKeystore() {
-    try {
-        if (fs.existsSync(KEYSTORE_PATH)) return JSON.parse(fs.readFileSync(KEYSTORE_PATH, 'utf8'));
-    } catch {}
-    return {};
-}
-
-function _writeKeystore(store) {
-    // Escritura atómica: si el proceso muere a mitad de la escritura, el
-    // keystore.json original sigue intacto en lugar de quedar truncado.
-    const tmp = KEYSTORE_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
-    fs.renameSync(tmp, KEYSTORE_PATH);
-}
-
-ipcMain.handle('keystore-get', (event, key) => {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const store = _readKeystore();
-    if (!store[key]) return null;
-    try { return safeStorage.decryptString(Buffer.from(store[key], 'base64')); }
-    catch { return null; }
-});
-
-ipcMain.handle('keystore-set', (event, key, value) => {
-    if (!safeStorage.isEncryptionAvailable()) return false;
-    const store = _readKeystore();
-    store[key] = safeStorage.encryptString(value).toString('base64');
-    _writeKeystore(store);
-    return true;
-});
-
-ipcMain.handle('keystore-remove', (event, key) => {
-    const store = _readKeystore();
-    delete store[key];
-    _writeKeystore(store);
-    return true;
-});
-
 // Buffer de salida PTY por terminal.
 // Implementa DEC Synchronized Output (\x1b[?2026h / \x1b[?2026l):
 // cuando detectamos el marker de inicio, retenemos el buffer hasta recibir
@@ -390,66 +363,19 @@ ipcMain.handle('select-file', async (event) => {
     return result.filePaths;
 });
 
-ipcMain.handle('create-compassai-workspace', async (event, workspaceName) => {
-    const senderId = event.sender.id;
-    const targetWindow = windowData.get(senderId)?.window;
-
-    const result = await dialog.showOpenDialog(targetWindow, {
-        properties: ['openDirectory', 'createDirectory'],
-        title: 'Selecciona dónde crear tu workspace CompassAI',
-        buttonLabel: 'Crear aquí'
-    });
-
-    if (!result || result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: 'Cancelado por el usuario' };
-    }
-
-    const parentDir = result.filePaths[0];
-
-    // Validar que el nombre no contiene separadores de ruta ni caracteres nulos
-    if (!workspaceName || /[/\\\0]/.test(workspaceName) || workspaceName === '.' || workspaceName === '..') {
-        return { success: false, error: 'Nombre de workspace inválido' };
-    }
-    const targetDir = path.join(parentDir, workspaceName);
-    // Verificar que el resultado final sigue dentro del directorio elegido
-    if (!targetDir.startsWith(parentDir + path.sep)) {
-        return { success: false, error: 'Nombre de workspace inválido' };
-    }
-
-    const templateDir = path.join(__dirname, 'templates', 'compassai');
-
-    const fs = require('fs');
-
-    // Helper function to recursively copy from asar to normal filesystem
-    function copyDirFromAsar(src, dest) {
-        if (!fs.existsSync(dest)) {
-            fs.mkdirSync(dest, { recursive: true });
-        }
-
-        const entries = fs.readdirSync(src, { withFileTypes: true });
-        for (const entry of entries) {
-            const srcPath = path.join(src, entry.name);
-            const destPath = path.join(dest, entry.name);
-
-            if (entry.isDirectory()) {
-                copyDirFromAsar(srcPath, destPath);
-            } else {
-                fs.copyFileSync(srcPath, destPath);
-            }
-        }
-    }
-
+// Abrir URLs externas en el navegador por defecto del sistema. Validamos
+// protocolo para no exponer file:/javascript:/protocolos custom a través
+// del bridge — sólo http(s).
+ipcMain.handle('open-external', async (event, url) => {
+    if (typeof url !== 'string') return false;
     try {
-        if (fs.existsSync(targetDir)) {
-            return { success: false, error: 'La carpeta ya existe' };
+        const u = new URL(url);
+        if (u.protocol === 'http:' || u.protocol === 'https:') {
+            await shell.openExternal(url);
+            return true;
         }
-
-        copyDirFromAsar(templateDir, targetDir);
-
-        return { success: true, path: targetDir };
-    } catch (err) {
-        return { success: false, error: err.message };
-    }
+    } catch {}
+    return false;
 });
 
 ipcMain.on('set-window-title', (event, data) => {
@@ -539,19 +465,19 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
 });
 
 // === TERMINAL NOTIFICATIONS ===
-ipcMain.on('terminal-notify', (event, { title, body }) => {
-    if (Notification.isSupported()) {
-        const n = new Notification({ title, body });
-        n.on('click', () => {
-            // Al hacer click en la notificación, enfocar la ventana
-            const win = BrowserWindow.fromWebContents(event.sender);
-            if (win) {
-                win.show();
-                win.focus();
-            }
-        });
-        n.show();
-    }
+// El paneId viaja end-to-end (renderer → main → notif → click → renderer)
+// para que al clicar la notif aterricemos en la pestaña + pane exactos.
+ipcMain.on('terminal-notify', (event, { paneId, title, body }) => {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title, body });
+    n.on('click', () => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win) { win.show(); win.focus(); }
+        if (paneId && !event.sender.isDestroyed()) {
+            event.sender.send('focus-pane', { paneId });
+        }
+    });
+    n.show();
 });
 
 // === PROTOTYPE SERVER (servir carpetas como servidor estático) ===

@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    if (typeof window.require !== 'undefined') {
+    if (window.api) {
         document.body.classList.add('electron-mode');
     }
 
@@ -60,16 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Welcome screen
     const welcomeLocalBtn = document.getElementById('welcomeLocalBtn');
-    const welcomeGitHubBtn = document.getElementById('welcomeGitHubBtn');
-    const welcomeCompassAIBtn = document.getElementById('welcomeCompassAIBtn');
-    const githubRepoSelector = document.getElementById('githubRepoSelector');
-    const githubUserInfo = document.getElementById('githubUserInfo');
-    const repoSearchInput = document.getElementById('repoSearchInput');
-    const repoList = document.getElementById('repoList');
-    const githubLogoutBtn = document.getElementById('githubLogoutBtn');
-    const githubSetup = document.getElementById('githubSetup');
-    const tokenInput = document.getElementById('tokenInput');
-    const saveTokenBtn = document.getElementById('saveTokenBtn');
     const sourceIndicator = document.getElementById('sourceIndicator');
 
     // Search Modal
@@ -83,10 +73,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeTabId = null;
     let isEditorOpen = false;
     let isTocOpen = false;
-    let currentGitHubRepo = null;
     let currentLocalFolderHandle = null;
     let currentNodeServer = false;
-    let allRepos = [];
     let expandedFolders = new Set();
     let splitGroups = []; // Array de { left: tabId, right: tabId } — pares de tabs emparejados
     let splitFlexPct = 50; // porcentaje del panel izquierdo (para recordar el resize)
@@ -178,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sourceIndicator.title = `Carpeta Local: ${currentLocalFolderHandle.name}`;
         } else if (currentNodeServer) {
             let folderName = 'Servidor Local';
-            if (typeof window.require !== 'undefined') {
+            if (window.api) {
                 const lastFolder = localStorage.getItem('pmos_last_folder');
                 if (lastFolder) {
                     const parts = lastFolder.split(/[/\\]/).filter(Boolean);
@@ -190,10 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
             projectName = folderName;
             sourceIndicator.textContent = 'LOCAL';
             sourceIndicator.title = `Servidor Node Local: ${folderName}`;
-        } else if (currentGitHubRepo) {
-            projectName = currentGitHubRepo.repo;
-            sourceIndicator.textContent = 'GITHUB';
-            sourceIndicator.title = `GitHub: ${currentGitHubRepo.fullName}`;
         } else {
             sourceIndicator.textContent = '';
             sourceIndicator.title = '';
@@ -206,16 +190,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.title = formattedTitle;
 
-        if (typeof window.require !== 'undefined') {
+        if (window.api) {
             try {
-                const { ipcRenderer } = window.require('electron');
                 let representedPath = null;
                 if (currentNodeServer) {
                     representedPath = localStorage.getItem('pmos_last_folder');
                 }
-                ipcRenderer.send('set-window-title', { 
-                    title: formattedTitle, 
-                    path: representedPath 
+                window.api.setWindowTitle({
+                    title: formattedTitle,
+                    path: representedPath
                 });
             } catch (err) {
                 console.error('Error setting native window title via IPC', err);
@@ -336,11 +319,10 @@ document.addEventListener('DOMContentLoaded', () => {
     })();
 
     async function saveWorkspaceState() {
-        if (!currentGitHubRepo && !currentLocalFolderHandle && !currentNodeServer) return;
+        if (!currentLocalFolderHandle && !currentNodeServer) return;
 
         const state = {
-            type: currentGitHubRepo ? 'github' : (currentNodeServer ? 'node' : 'local'),
-            currentGitHubRepo,
+            type: currentNodeServer ? 'node' : 'local',
             localFolderHandle: currentLocalFolderHandle,
             currentNodeServer,
             activeTabId,
@@ -353,12 +335,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 handle: t.handle,
                 isLocal: t.isLocal,
                 isNode: t.isNode,
-                isGitHub: t.isGitHub,
                 isHtml: t.isHtml,
                 isCoda: t.isCoda,
                 codaId: t.codaId,
                 codaEmbedUrl: t.codaEmbedUrl,
-                githubMeta: t.githubMeta,
                 content: t.isCoda ? '' : t.content,
                 rawContent: t.isCoda ? '' : t.rawContent,
                 savedContent: t.isCoda ? '' : t.savedContent,
@@ -380,11 +360,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initApp();
 
     async function initApp() {
-        await GitHubAPI.init(); // carga el token cifrado desde el keychain del sistema
         const state = await WorkspaceDB.load();
-        if (state && (state.currentGitHubRepo || state.localFolderHandle || state.currentNodeServer)) {
+        if (state && (state.localFolderHandle || state.currentNodeServer)) {
             // Restore state
-            currentGitHubRepo = state.currentGitHubRepo;
             currentLocalFolderHandle = state.localFolderHandle;
             currentNodeServer = state.currentNodeServer || false;
             openTabs = state.openTabs || [];
@@ -398,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // En CompassAI nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
-            if (typeof window.require !== 'undefined' && currentLocalFolderHandle) {
+            if (window.api && currentLocalFolderHandle) {
                 currentLocalFolderHandle = null;
                 openTabs = []; // Evitamos pestañas rotas de sesiones pasadas
             }
@@ -428,20 +406,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // showApp(); // <- QUITAR ESTO DE AQUÍ GENERAL.
 
             // Render Sidebar
-            if (currentGitHubRepo) {
-                showApp();
-                fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
-                try {
-                    const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
-                    if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
-                    fileTreeContainer.innerHTML = '';
-                    fileTreeContainer.appendChild(renderTreeItem(treeData, true));
-                } catch (err) {
-                    fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
-                }
-            } else if (currentNodeServer) {
+            if (currentNodeServer) {
                 // Si estamos en CompassAI (Electron nativo)
-                if (typeof window.require !== 'undefined') {
+                if (window.api) {
                     const lastFolder = localStorage.getItem('pmos_last_folder');
                     if (lastFolder) {
                         try {
@@ -555,8 +522,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function showWelcomeScreen() {
         welcomeScreen.style.display = 'flex';
         appContainer.style.display = 'none';
-        githubRepoSelector.style.display = 'none';
-        githubSetup.style.display = 'none';
     }
 
     function showApp() {
@@ -573,9 +538,8 @@ document.addEventListener('DOMContentLoaded', () => {
     welcomeLocalBtn.addEventListener('click', async () => {
         try {
             // 1. Detección primero para CompassAI (Electron)
-            if (typeof window.require !== 'undefined') {
-                const { ipcRenderer } = window.require('electron');
-                const folderPath = await ipcRenderer.invoke('select-folder');
+            if (window.api) {
+                const folderPath = await window.api.selectFolder();
 
                 if (!folderPath) return; // Usuario canceló el popup nativo de Mac
 
@@ -587,7 +551,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 if (res.ok) {
-                    currentGitHubRepo = null;
                     currentLocalFolderHandle = null;
                     currentNodeServer = true;
                     localStorage.setItem('pmos_last_folder', folderPath);
@@ -604,7 +567,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // 2. Comprobar si tenemos el servidor backend Node local corriendo de fondo (Web Mode)
             const res = await fetch('/api/tree').catch(() => null);
             if (res && res.ok) {
-                currentGitHubRepo = null;
                 currentLocalFolderHandle = null;
                 currentNodeServer = true;
                 showApp();
@@ -615,7 +577,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 3. Fallback final: usar File System Access API nativa (Web Browser Mode)
             const dirHandle = await window.showDirectoryPicker();
-            currentGitHubRepo = null;
             currentNodeServer = false;
             currentLocalFolderHandle = dirHandle;
             showApp();
@@ -628,227 +589,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // GitHub
-    welcomeGitHubBtn.addEventListener('click', async () => {
-        if (GitHubAPI.isAuthenticated()) {
-            await showGitHubRepos();
-        } else {
-            githubSetup.style.display = 'block';
-            tokenInput.value = '';
-            tokenInput.focus();
-        }
-    });
-
-    // CompassAI
-    if (welcomeCompassAIBtn) {
-        welcomeCompassAIBtn.addEventListener('click', async () => {
-            const workspaceName = await showCustomPrompt('Nombre del workspace (carpeta):', 'CompassAI');
-            if (!workspaceName) return;
-
-            if (typeof window.require !== 'undefined') {
-                // Modo Electron (Nativo)
-                const { ipcRenderer } = window.require('electron');
-                const result = await ipcRenderer.invoke('create-compassai-workspace', workspaceName);
-
-                if (!result.success) {
-                    if (result.error !== 'Cancelado por el usuario') {
-                        alert('Error: ' + result.error);
-                    }
-                    return;
-                }
-
-                await applyNewWorkspace(result.path);
-            } else {
-                // Modo Web (Fallback al backend normal)
-                try {
-                    const res = await fetch('/api/create-compassai-workspace', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ workspaceName })
-                    });
-
-                    const data = await res.json();
-
-                    if (res.ok && data.success) {
-                        await applyNewWorkspace(data.path);
-                    } else {
-                        alert('Error: ' + (data.error || 'Fallo desconocido'));
-                    }
-                } catch (err) {
-                    alert('Error de red al crear workspace: ' + err.message);
-                }
-            }
-        });
-    }
-
-    async function applyNewWorkspace(targetFolder) {
-        // Set as current folder
-        const res = await fetch('/api/set-root', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newRoot: targetFolder })
-        });
-
-        if (res.ok) {
-            currentGitHubRepo = null;
-            currentLocalFolderHandle = null;
-            currentNodeServer = true;
-            localStorage.setItem('pmos_last_folder', targetFolder);
-            showApp();
-            await renderNodeFolder();
-            saveWorkspaceState();
-
-            // Abrir automáticamente START-HERE.md
-            setTimeout(() => {
-                const fakeItem = {
-                    path: 'START-HERE.md',
-                    name: 'START-HERE.md',
-                    type: 'file'
-                };
-                openFileTab(fakeItem);
-            }, 300);
-
-            setTimeout(() => {
-                if (window.terminalCtrl && window.terminalCtrl.openTerminal) {
-                    // Abrir terminal y enviar el comando inicial de setup
-                    window.terminalCtrl.openTerminal();
-                    // Dar un pequeño margen para que el terminal se renderice y esté listo
-                    setTimeout(() => {
-                        const activeId = window.terminalCtrl.getActiveTerminalId();
-                        if (activeId) {
-                            window.terminalCtrl.sendInput(activeId, '/setup\r');
-                        }
-                    }, 1000);
-                } else {
-                    alert('Workspace creado. Abre el terminal de la app y ejecuta /setup para empezar.');
-                }
-            }, 500);
-        } else {
-            alert('Error al establecer la carpeta en CompassAI.');
-        }
-    }
-
-    // Guardar Token
-    saveTokenBtn.addEventListener('click', async () => {
-        const token = tokenInput.value.trim();
-        if (!token) {
-            alert('Por favor introduce un token válido.');
-            return;
-        }
-        GitHubAPI.setToken(token);
-        githubSetup.style.display = 'none';
-        try {
-            await showGitHubRepos();
-        } catch (err) {
-            GitHubAPI.clearToken();
-            alert('Token inválido: ' + err.message);
-            githubSetup.style.display = 'block';
-        }
-    });
-
-    // Logout GitHub
-    githubLogoutBtn.addEventListener('click', () => {
-        GitHubAPI.clearToken();
-        currentGitHubRepo = null;
-        currentNodeServer = false;
-        activeTabId = null;
-        openTabs = [];
-        tabHistory = {};
-        saveWorkspaceState();
-        githubRepoSelector.style.display = 'none';
-
-        // Force reload to completely clear any cached state in memory
-        window.location.reload();
-    });
-
-    // ===================================
-    // GITHUB: LISTAR REPOS
-    // ===================================
-
-    async function showGitHubRepos() {
-        githubRepoSelector.style.display = 'block';
-        githubSetup.style.display = 'none';
-        repoList.innerHTML = '<div class="loading-state" style="padding: 16px;">Cargando repositorios...</div>';
-
-        try {
-            const user = await GitHubAPI.getUser();
-            githubUserInfo.innerHTML = `
-                <img src="${user.avatar_url}" alt="${user.login}">
-                <span><strong>${user.name || user.login}</strong></span>
-            `;
-
-            // Cargar repos (varias páginas)
-            allRepos = [];
-            let page = 1;
-            while (true) {
-                const repos = await GitHubAPI.listRepos(page, 100);
-                if (repos.length === 0) break;
-                allRepos = allRepos.concat(repos);
-                if (repos.length < 100) break;
-                page++;
-            }
-
-            renderRepoList(allRepos);
-
-            // Filtrar repos con el buscador
-            repoSearchInput.addEventListener('input', () => {
-                const query = repoSearchInput.value.toLowerCase();
-                const filtered = allRepos.filter(r =>
-                    r.full_name.toLowerCase().includes(query)
-                );
-                renderRepoList(filtered);
-            });
-
-        } catch (err) {
-            repoList.innerHTML = `<div class="error-state" style="padding: 16px;">Error: ${err.message}</div>`;
-        }
-    }
-
-    function renderRepoList(repos) {
-        repoList.innerHTML = '';
-        if (repos.length === 0) {
-            repoList.innerHTML = '<div class="loading-state" style="padding: 16px;">Sin resultados</div>';
-            return;
-        }
-        repos.forEach(repo => {
-            const item = document.createElement('div');
-            item.className = 'repo-item';
-            item.innerHTML = `
-                <div>
-                    <div class="repo-name">${repo.name}</div>
-                    <div class="repo-owner">${repo.full_name}</div>
-                </div>
-                ${repo.private ? '<span class="repo-private">Privado</span>' : ''}
-            `;
-            item.addEventListener('click', () => openGitHubRepo(repo));
-            repoList.appendChild(item);
-        });
-    }
-
-    async function openGitHubRepo(repo) {
-        currentGitHubRepo = {
-            owner: repo.owner.login,
-            repo: repo.name,
-            fullName: repo.full_name
-        };
-        currentLocalFolderHandle = null;
-
-        showApp();
-        fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
-
-        try {
-            const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
-            if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
-
-            fileTreeContainer.innerHTML = '';
-            const rootEl = renderTreeItem(treeData, true);
-            fileTreeContainer.appendChild(rootEl);
-            saveWorkspaceState();
-        } catch (err) {
-            fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
-        }
-    }
-
     // ===================================
     // BOTONES DE LA APP PRINCIPAL
     // ===================================
@@ -856,7 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Abrir Terminal (Solo Electron)
     const openTerminalMenuBtn = document.getElementById('openTerminalMenuBtn');
     const menuTerminalDropdown = document.getElementById('menuTerminalProfileDropdown');
-    if (openTerminalMenuBtn && typeof window.require !== 'undefined') {
+    if (openTerminalMenuBtn && window.api) {
         openTerminalMenuBtn.style.display = 'block';
         openTerminalMenuBtn.addEventListener('click', () => {
             if (window.terminalCtrl) {
@@ -914,9 +654,8 @@ document.addEventListener('DOMContentLoaded', () => {
         openFolderBtn.addEventListener('click', async () => {
             try {
                 // 1. Detección primero para CompassAI (Electron)
-                if (typeof window.require !== 'undefined') {
-                    const { ipcRenderer } = window.require('electron');
-                    const folderPath = await ipcRenderer.invoke('select-folder');
+                if (window.api) {
+                        const folderPath = await window.api.selectFolder();
 
                     if (!folderPath) return; // Usuario canceló el popup nativo de Mac
 
@@ -928,7 +667,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
 
                     if (res.ok) {
-                        currentGitHubRepo = null;
                         currentLocalFolderHandle = null;
                         currentNodeServer = true;
                         localStorage.setItem('pmos_last_folder', folderPath);
@@ -944,7 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 2. Fallback final: Web Browser Mode
                 const dirHandle = await window.showDirectoryPicker();
-                currentGitHubRepo = null;
                 currentNodeServer = false;
                 currentLocalFolderHandle = dirHandle;
                 await renderLocalFolder(dirHandle);
@@ -954,26 +691,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     fileTreeContainer.innerHTML = `<div class="error-state">Error al abrir carpeta: ${err.message}</div>`;
                 }
             }
-        });
-    }
-
-    // Botón Home
-    const homeBtn = document.getElementById('homeBtn');
-    if (homeBtn) {
-        homeBtn.addEventListener('click', () => {
-            // Verificar si hay tabs dirty
-            const dirtyTabs = openTabs.filter(t => t.dirty);
-            if (dirtyTabs.length > 0) {
-                if (!confirm('Hay archivos con cambios sin guardar. ¿Volver al inicio?')) return;
-            }
-            openTabs = [];
-            activeTabId = null;
-            currentGitHubRepo = null;
-            currentLocalFolderHandle = null;
-            currentNodeServer = false;
-            renderTabs();
-            showWelcomeScreen();
-            saveWorkspaceState();
         });
     }
 
@@ -1015,22 +732,11 @@ document.addEventListener('DOMContentLoaded', () => {
     sidebarOverlay.addEventListener('click', closeMobileSidebar);
 
     // Soft refresh: Cmd+R refresca árbol y documento activo, sin tocar terminales
-    if (typeof window.require !== 'undefined') {
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.on('soft-refresh', async () => {
+    if (window.api) {
+        window.api.onSoftRefresh(async () => {
             // 1. Refrescar árbol de archivos
             if (currentNodeServer) {
                 await renderNodeFolder();
-            } else if (currentGitHubRepo) {
-                fileTreeContainer.innerHTML = '<div class="loading-state">Cargando archivos del repositorio...</div>';
-                try {
-                    const treeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
-                    if (typeof flattenTreeToPaths === 'function') flatSearchPaths = flattenTreeToPaths(treeData);
-                    fileTreeContainer.innerHTML = '';
-                    fileTreeContainer.appendChild(renderTreeItem(treeData, true));
-                } catch (err) {
-                    fileTreeContainer.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
-                }
             } else if (currentLocalFolderHandle) {
                 const treeData = await getTreeFromHandle(currentLocalFolderHandle, '');
                 fileTreeContainer.innerHTML = '';
@@ -1475,7 +1181,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Abre un prototipo: levanta servidor estático y lo muestra en webview
     async function openPrototypeTab(folderPath, folderName) {
-        if (typeof window.require === 'undefined') return;
+        if (!window.api) return;
 
         const tabId = `proto:${folderPath}`;
         const existing = openTabs.find(t => t.id === tabId);
@@ -1483,8 +1189,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         showToast(`Levantando servidor para ${folderName}...`, 'info', 2000);
 
-        const { ipcRenderer } = window.require('electron');
-        const result = await ipcRenderer.invoke('proto-server-start', folderPath);
+        const result = await window.api.protoServerStart(folderPath);
 
         if (!result.ok) {
             showToast(`Error: ${result.error}`, 'warning', 4000);
@@ -1497,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
             name: `▶ ${folderName}`,
             path: null,
             handle: null,
-            isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+            isLocal: false, isNode: false, isHtml: false,
             isCoda: true, // Reutilizar mecanismo webview
             codaId: tabId,
             codaEmbedUrl: url,
@@ -1527,9 +1232,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handle: item.handle,
                 isLocal: !!item.handle,
                 isNode: currentNodeServer,
-                isGitHub: !!currentGitHubRepo && !item.handle,
                 isHtml: item.name.endsWith('.html'),
-                githubMeta: currentGitHubRepo ? { ...currentGitHubRepo, sha: item.sha } : null,
                 content: null,
                 rawContent: null,
                 savedContent: null,
@@ -1788,9 +1491,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Parar servidor de prototipo si lo tiene
-        if (tab && tab.protoFolderPath && typeof window.require !== 'undefined') {
-            const { ipcRenderer } = window.require('electron');
-            ipcRenderer.invoke('proto-server-stop', tab.protoFolderPath);
+        if (tab && tab.protoFolderPath && window.api) {
+            window.api.protoServerStop(tab.protoFolderPath);
         }
 
         // Si el tab está en un split group, deshacer ese split
@@ -1905,11 +1607,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/file?path=${encodeURIComponent(tabData.path)}`);
                 if (!res.ok) throw new Error('Error al leer el archivo');
                 markdownText = await res.text();
-            } else if (tabData.isGitHub) {
-                const data = await GitHubAPI.getFileContent(
-                    tabData.githubMeta.owner, tabData.githubMeta.repo, tabData.path
-                );
-                markdownText = data.content;
             }
 
             if (tabData.isHtml) {
@@ -2142,15 +1839,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`/api/file?path=${encodeURIComponent(tabData.path)}`);
                 if (!res.ok) throw new Error('Error al leer el archivo desde el servidor');
                 markdownText = await res.text();
-            } else if (tabData.isGitHub) {
-                // GitHub API
-                const data = await GitHubAPI.getFileContent(
-                    tabData.githubMeta.owner,
-                    tabData.githubMeta.repo,
-                    tabData.path
-                );
-                markdownText = data.content;
-                tabData.githubMeta.sha = data.sha; // Actualizar SHA para futuras escrituras
             }
 
             tabData.rawContent = markdownText;
@@ -2274,19 +1962,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         lastTreeHash = currentHash;
                     }
                 }
-            } else if (currentGitHubRepo) {
-                // Pedir el commit SHAs tree de github
-                const newTreeData = await GitHubAPI.getRepoTree(currentGitHubRepo.owner, currentGitHubRepo.repo);
-                const currentHash = hashTreeData(newTreeData);
-
-                if (lastTreeHash !== null && lastTreeHash !== currentHash) {
-                    lastTreeHash = currentHash;
-                    fileTreeContainer.innerHTML = '';
-                    const rootEl = renderTreeItem(newTreeData, true);
-                    fileTreeContainer.appendChild(rootEl);
-                } else {
-                    lastTreeHash = currentHash;
-                }
             }
         } catch (e) { /* ignore tree polling errors */ }
 
@@ -2310,16 +1985,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         continue;
                     }
-
-                } else if (tab.isGitHub && tab.githubMeta) {
-                    const data = await GitHubAPI.getFileContent(
-                        tab.githubMeta.owner,
-                        tab.githubMeta.repo,
-                        tab.path
-                    );
-                    if (data.sha === tab.githubMeta.sha) continue;
-                    newContent = data.content;
-                    tab.githubMeta.sha = data.sha;
 
                 } else {
                     continue;
@@ -2382,16 +2047,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: JSON.stringify({ path: activeTab.path, content: activeTab.rawContent })
                 });
                 if (!res.ok) throw new Error('Error al guardar en el servidor local');
-            } else if (activeTab.isGitHub) {
-                // GitHub API — crea un commit
-                const result = await GitHubAPI.saveFile(
-                    activeTab.githubMeta.owner,
-                    activeTab.githubMeta.repo,
-                    activeTab.path,
-                    activeTab.rawContent,
-                    activeTab.githubMeta.sha
-                );
-                activeTab.githubMeta.sha = result.content.sha; // Actualizar SHA
             }
 
             activeTab.dirty = false;
@@ -2897,12 +2552,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openSearchModal() {
-        if (!currentLocalFolderHandle && !currentGitHubRepo && !currentNodeServer) return;
+        if (!currentLocalFolderHandle && !currentNodeServer) return;
 
-        if (currentGitHubRepo) {
-            showToast('La búsqueda global (Cmd+P) está desactivada para repositorios GitHub.', 'warning');
-            return;
-        }
         isSearchModalOpen = true;
         searchModal.style.display = 'flex';
         searchInput.value = '';
@@ -2911,11 +2562,6 @@ document.addEventListener('DOMContentLoaded', () => {
         searchSelectedIndex = -1;
         searchInput.focus();
         searchSpinner.style.display = 'none';
-
-        // Si no hay búsqueda aún, mostrar archivos recientes o simplemente la lista de paths
-        if (flatSearchPaths.length === 0 && currentGitHubRepo && lastTreeHash) {
-            // Reconstruimos la lista plana si tenemos el árbol (via hash o caché)
-        }
     }
 
     function closeSearchModal() {
@@ -3039,66 +2685,13 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSearchResults = pathResults.slice(0, 20);
             renderSearchResults();
 
-        } else if (currentGitHubRepo) {
-            // GITHUB: 1. Instantly show path matches from flatSearchPaths
-            let pathResults = [];
-            if (flatSearchPaths && flatSearchPaths.length > 0) {
-                pathResults = flatSearchPaths
-                    .filter(item => item.name.toLowerCase().includes(q) || item.path.toLowerCase().includes(q))
-                    .map(item => ({
-                        path: item.path,
-                        name: item.name,
-                        isTitleMatch: true,
-                        snippet: ''
-                    }));
-
-                pathResults.sort((a, b) => a.name.localeCompare(b.name));
-            }
-
-            currentSearchResults = pathResults.slice(0, 20);
-            renderSearchResults();
-
-            // GITHUB: 2. API Search for inside contents (asynchronously appended)
-            searchSpinner.style.display = 'block';
-            try {
-                // API requiere algo de formato, evitamos rate limits
-                const data = await GitHubAPI.searchCode(currentGitHubRepo.owner, currentGitHubRepo.repo, q);
-                searchSpinner.style.display = 'none';
-
-                if (data && data.items) {
-                    const existingPaths = new Set(currentSearchResults.map(r => r.path));
-                    const apiResults = data.items
-                        .filter(item => !existingPaths.has(item.path))
-                        .map(item => ({
-                            path: item.path,
-                            name: item.name,
-                            isTitleMatch: item.name.toLowerCase().includes(q),
-                            snippet: '... coincidencia en contenido ...'
-                        }));
-
-                    currentSearchResults = [...currentSearchResults, ...apiResults].slice(0, 20);
-                    renderSearchResults();
-                }
-            } catch (err) {
-                searchSpinner.style.display = 'none';
-                if (currentSearchResults.length === 0) {
-                    searchResults.innerHTML = `<div style="padding: 10px; color: var(--text-warning);">Buscar texto: ${err.message}</div>`;
-                }
-            }
         }
     }
 
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value;
         clearTimeout(searchDebounceTimer);
-
-        if (currentLocalFolderHandle) {
-            // Local es instantáneo, poco debounce
-            searchDebounceTimer = setTimeout(() => performSearch(query), 100);
-        } else {
-            // GitHub penaliza muchisimo el rate limit (10 por min), debounce alto
-            searchDebounceTimer = setTimeout(() => performSearch(query), 800);
-        }
+        searchDebounceTimer = setTimeout(() => performSearch(query), 100);
     });
 
     function renderSearchResults() {
@@ -3296,7 +2889,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // SETTINGS MODAL + CODA/NOTION PHASE 2 (API Key)
     // ============================================================
     (function () {
-        const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+        const api = window.api || null;
 
         const modal        = document.getElementById('settingsModal');
         const settingsBtn  = document.getElementById('settingsBtn');
@@ -3362,19 +2955,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ---- Coda API helper ----
         async function codaGet(apiPath, apiKey) {
-            if (!ipcRenderer) {
+            if (!api) {
                 // Fallback for non-Electron (dev): direct fetch (may fail CORS)
                 const r = await fetch(`https://coda.io/apis/v1${apiPath}`, {
                     headers: { 'Authorization': `Bearer ${apiKey}` }
                 });
                 return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
             }
-            return ipcRenderer.invoke('coda-api-request', { path: apiPath, apiKey });
+            return api.codaApiRequest({ path: apiPath, apiKey });
         }
 
         // ---- Notion API helper ----
         async function notionReq(apiPath, method = 'GET', body = null, apiKey) {
-            if (!ipcRenderer) {
+            if (!api) {
                 const r = await fetch(`https://api.notion.com/v1${apiPath}`, {
                     method,
                     headers: {
@@ -3386,7 +2979,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
             }
-            return ipcRenderer.invoke('notion-api-request', { path: apiPath, method, body, apiKey });
+            return api.notionApiRequest({ path: apiPath, method, body, apiKey });
         }
 
         // ---- Open / Close modal ----
@@ -3728,7 +3321,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: page.name,
                 path: null,
                 handle: null,
-                isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+                isLocal: false, isNode: false, isHtml: false,
                 isCoda: true,
                 codaId: tabId,
                 codaEmbedUrl: pageUrl,
@@ -3830,7 +3423,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 name: title,
                 path: null,
                 handle: null,
-                isLocal: false, isNode: false, isGitHub: false, isHtml: false,
+                isLocal: false, isNode: false, isHtml: false,
                 isCoda: true, // Reuse coda webview mechanism for simplicity
                 codaId: tabId,
                 codaEmbedUrl: pageUrl,

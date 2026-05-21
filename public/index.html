@@ -25,87 +25,27 @@
 </head>
 
 <body>
-    <!-- Pantalla de Bienvenida (se oculta al elegir una fuente) -->
+    <!-- Pantalla de Bienvenida (se oculta al abrir una carpeta) -->
     <div id="welcomeScreen" class="welcome-overlay">
         <div class="welcome-card">
             <h1 class="welcome-title" style="display: flex; align-items: center; justify-content: center; gap: 12px;">
                 <img src="/icon.png" alt="" width="36" height="36" style="border-radius: 6px;"> CompassAI
             </h1>
-            <p class="welcome-subtitle">Elige una fuente de archivos para comenzar</p>
+            <p class="welcome-subtitle">Tu base de conocimiento con IA integrada</p>
 
-            <div class="source-options">
-                <!-- Opción 1: Carpeta Local -->
-                <button id="welcomeLocalBtn" class="source-btn desktop-only">
-                    <div class="source-icon">
-                        <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
-                            </path>
-                        </svg>
-                    </div>
-                    <span class="source-title">Carpeta Local</span>
-                    <span class="source-desc">Abre una carpeta desde tu equipo</span>
-                </button>
+            <ul class="welcome-bullets">
+                <li>Terminal integrado, sin salir de la app</li>
+                <li>La IA siempre conoce todo tu proyecto</li>
+                <li>Elige Claude, OpenAI o Gemini en cada momento</li>
+            </ul>
 
-                <!-- Opción 2: GitHub -->
-                <button id="welcomeGitHubBtn" class="source-btn">
-                    <div class="source-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                            <path
-                                d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                        </svg>
-                    </div>
-                    <span class="source-title">GitHub</span>
-                    <span class="source-desc">Conecta con un repositorio</span>
-                </button>
-
-                <!-- Opción 3: CompassAI -->
-                <button id="welcomeCompassAIBtn" class="source-btn">
-                    <div class="source-icon">
-                        <svg width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
-                        </svg>
-                    </div>
-                    <span class="source-title">CompassAI desde cero</span>
-                    <span class="source-desc">Crea un workspace predefinido</span>
-                </button>
-            </div>
-
-            <!-- Selector de repo GitHub (oculto por defecto) -->
-            <div id="githubRepoSelector" class="github-selector" style="display: none;">
-                <div class="github-user-info" id="githubUserInfo"></div>
-                <input type="text" id="repoSearchInput" class="repo-search" placeholder="Buscar repositorio...">
-                <div id="repoList" class="repo-list"></div>
-                <button id="githubLogoutBtn" class="logout-btn">Desconectar GitHub</button>
-            </div>
-
-            <!-- Config GitHub Token (solo primera vez) -->
-            <div id="githubSetup" class="github-setup" style="display: none;">
-                <p>Pega tu <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">Fine-grained
-                        Token</a> de GitHub:</p>
-                <input type="password" id="tokenInput" class="repo-search" placeholder="github_pat_xxxxxxxxx...">
-                <button id="saveTokenBtn" class="source-btn" style="width: 100%; margin-top: 8px;">
-                    <span class="source-title">Conectar</span>
-                </button>
-
-                <!-- Acordeón de ayuda -->
-                <details class="github-help-details">
-                    <summary>¿Cómo configuro el token para ver repositorios privados?</summary>
-                    <div class="github-help-content">
-                        <p><strong>1.</strong> Haz clic en el enlace de arriba ("Fine-grained Token").</p>
-                        <p><strong>2.</strong> Ponle un nombre y elige su duración.</p>
-                        <p><strong>3.</strong> En <strong>Repository access</strong>, elige <em>"All repositories"</em>
-                            o <em>"Only select repositories"</em> (y selecciona los privados que necesites).</p>
-                        <p><strong>4.</strong> Despliega <strong>Repository permissions</strong>, busca
-                            <strong>Contents</strong> y ponlo en <em>"Read and write"</em>.
-                        </p>
-                        <p><strong>5.</strong> Baja del todo y dale a <strong>Generate token</strong>. Copia y pega aquí
-                            el código que empieza por <code>github_pat_</code>.</p>
-                        <p><em>💡 Nota: El token nunca sale de tu navegador web.</em></p>
-                    </div>
-                </details>
-            </div>
+            <button id="welcomeLocalBtn" class="welcome-cta desktop-only">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                </svg>
+                <span>Abrir carpeta</span>
+            </button>
         </div>
     </div>
 
@@ -143,13 +83,6 @@
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                 d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
-                            </path>
-                        </svg>
-                    </button>
-                    <button id="homeBtn" class="action-btn" title="Desconectar y volver a explorar">
-                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">
                             </path>
                         </svg>
                     </button>
@@ -473,9 +406,8 @@
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button id="customPromptCancel" class="action-btn"
                     style="padding: 8px 16px; border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">Cancelar</button>
-                <button id="customPromptOk" class="source-btn"
-                    style="padding: 8px 16px; margin: 0; border-radius: 6px; cursor: pointer;"><span
-                        class="source-title" style="font-size: 14px;">Aceptar</span></button>
+                <button id="customPromptOk" class="welcome-cta"
+                    style="padding: 8px 16px; border-radius: 6px; font-size: 14px;">Aceptar</button>
             </div>
         </div>
     </div>
@@ -485,10 +417,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
+    <!-- xterm + addons: UMD copia exports a window (Terminal, FitAddon, ...) -->
+    <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
+    <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+
     <!-- Módulos de la aplicación -->
-    <script src="github.js?v=2"></script>
-    <script src="chat.js?v=2"></script>
-    <script src="app.js?v=2"></script>
+    <script src="chat.js?v=8"></script>
+    <script src="app.js?v=8"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;">

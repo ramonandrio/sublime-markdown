@@ -945,225 +945,69 @@ body {
 .welcome-subtitle {
     color: var(--text-muted);
     font-size: 0.95rem;
-    margin-bottom: 32px;
+    margin-bottom: 20px;
 }
 
-.source-options {
-    display: flex;
-    gap: 16px;
+.welcome-bullets {
+    list-style: none;
+    padding: 0 0 0 60px;
+    margin: 0 auto 28px;
+    text-align: left;
+    display: inline-block;
+}
+
+.welcome-bullets li {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.welcome-bullets li:last-child {
     margin-bottom: 0;
 }
 
-.source-btn {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
+.welcome-bullets li::before {
+    content: '•';
+    position: absolute;
+    left: 4px;
+    top: -1px;
+    color: var(--text-accent);
+    font-weight: 700;
+}
+
+.welcome-cta {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 24px 16px;
+    gap: 10px;
+    padding: 12px 28px;
     border: 1.5px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: 10px;
     background: white;
+    color: var(--text-primary);
     cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    font-family: inherit;
     transition: all 0.2s ease;
 }
 
-.source-btn:hover {
+.welcome-cta:hover {
     border-color: var(--text-accent);
     background: #f0f6ff;
-    transform: translateY(-2px);
+    color: var(--text-accent);
+    transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(9, 105, 218, 0.12);
 }
 
-.source-icon {
+.welcome-cta svg {
     color: var(--text-muted);
     transition: color 0.2s;
 }
 
-.source-btn:hover .source-icon {
-    color: var(--text-accent);
-}
-
-.source-title {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text-primary);
-}
-
-.source-desc {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-}
-
-/* GitHub Repo Selector */
-.github-selector {
-    margin-top: 24px;
-    text-align: left;
-}
-
-.github-user-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px;
-    background: var(--bg-darker);
-    border-radius: 8px;
-    margin-bottom: 12px;
-    font-size: 0.85rem;
-}
-
-.github-user-info img {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-}
-
-.repo-search {
-    width: 100%;
-    padding: 10px 14px;
-    border: 1.5px solid var(--border-color);
-    border-radius: 8px;
-    font-family: var(--font-ui);
-    font-size: 0.85rem;
-    outline: none;
-    margin-bottom: 8px;
-    transition: border-color 0.15s;
-}
-
-.repo-search:focus {
-    border-color: var(--text-accent);
-}
-
-.repo-list {
-    max-height: 300px;
-    overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-}
-
-.repo-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border-color);
-    transition: background 0.15s;
-    font-size: 0.85rem;
-}
-
-.repo-item:last-child {
-    border-bottom: none;
-}
-
-.repo-item:hover {
-    background: var(--bg-hover);
-}
-
-.repo-item .repo-name {
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.repo-item .repo-owner {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-}
-
-.repo-item .repo-private {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    background: #fff3cd;
-    color: #856404;
-    border-radius: 4px;
-    margin-left: auto;
-}
-
-.logout-btn {
-    margin-top: 12px;
-    padding: 8px 16px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: white;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.8rem;
-    font-family: var(--font-ui);
-    transition: all 0.15s;
-    width: 100%;
-}
-
-.logout-btn:hover {
-    background: #fee;
-    border-color: #e06c75;
-    color: #e06c75;
-}
-
-.github-setup {
-    margin-top: 24px;
-    text-align: left;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
-.github-setup a {
-    color: var(--text-accent);
-}
-
-.github-setup p {
-    margin-bottom: 12px;
-}
-
-.github-help-details {
-    margin-top: 16px;
-    background-color: var(--bg-hover);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    text-align: left;
-}
-
-.github-help-details summary {
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    padding: 8px 12px;
-    cursor: pointer;
-    user-select: none;
-    outline: none;
-    transition: background-color 0.2s;
-}
-
-.github-help-details summary:hover {
-    background-color: var(--bg-selection);
-    color: #fff;
-}
-
-.github-help-content {
-    border-top: 1px solid var(--border-color);
-    padding: 12px;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-    background-color: var(--bg-dark);
-}
-
-.github-help-content p {
-    margin-bottom: 6px;
-    font-size: 0.75rem;
-}
-
-.github-help-content p:last-child {
-    margin-bottom: 0;
-}
-
-.github-help-content strong {
-    color: var(--text-primary);
-}
-
-.github-help-content code {
-    background-color: var(--bg-hover);
-    padding: 2px 4px;
-    border-radius: 3px;
+.welcome-cta:hover svg {
     color: var(--text-accent);
 }
 
@@ -1315,14 +1159,6 @@ body {
         width: 90vw !important;
         max-width: 400px;
         padding: 24px !important;
-    }
-
-    .source-options {
-        flex-direction: column !important;
-    }
-
-    .source-btn {
-        max-width: none !important;
     }
 
     /* Welcome title smaller */
@@ -1626,82 +1462,102 @@ body {
     color: var(--text-primary);
 }
 
-/* Terminal Busy Spinner (comandos normales) */
-.terminal-tab.terminal-busy .terminal-tab-name::before {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
+/* Pestaña que necesita atención del usuario (idle tras output o comando
+   shell largo terminado). Un punto azul al lado del nombre, sin animación. */
+.terminal-tab.needs-attention .terminal-tab-name::before {
+    content: '●';
+    color: var(--text-accent);
     margin-right: 6px;
-    border: 2px solid var(--text-accent);
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: tab-spin 0.8s linear infinite;
-    vertical-align: middle;
-}
-
-@keyframes tab-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* Claude Thinking — spinner color Claude */
-.terminal-tab.claude-thinking .terminal-tab-name::before {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-right: 6px;
-    border: 2px solid #D97757;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: tab-spin 0.8s linear infinite;
-    vertical-align: middle;
-}
-
-/* Claude Waiting — necesita acción del usuario */
-.terminal-tab.claude-waiting .terminal-tab-name::before {
-    content: '✦';
-    display: inline-block;
-    margin-right: 5px;
-    color: #D97757;
-    font-size: 14px;
+    font-size: 0.85rem;
     line-height: 1;
-    animation: claude-attention 2s ease-in-out infinite;
     vertical-align: middle;
 }
 
-@keyframes claude-attention {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+/* Toast in-app: aviso de pane idle cuando la app tiene foco. Reemplaza a la
+   notificación nativa macOS cuando estás dentro de la app. */
+.notif-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 360px;
+    padding: 12px 14px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    font-family: var(--font-ui);
+    animation: notif-toast-in 0.2s ease-out;
 }
 
-/* Gemini Thinking — spinner azul */
-.terminal-tab.gemini-thinking .terminal-tab-name::before {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-right: 6px;
-    border: 2px solid #4285F4;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: tab-spin 0.8s linear infinite;
-    vertical-align: middle;
+@keyframes notif-toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ChatGPT Thinking — spinner verde */
-.terminal-tab.openai-thinking .terminal-tab-name::before {
-    content: '';
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    margin-right: 6px;
-    border: 2px solid #10A37F;
-    border-right-color: transparent;
-    border-radius: 50%;
-    animation: tab-spin 0.8s linear infinite;
-    vertical-align: middle;
+.notif-toast-text {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.notif-toast-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notif-toast-body {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.notif-toast-action {
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-accent);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.notif-toast-action:hover {
+    background: #f0f6ff;
+    border-color: var(--text-accent);
+}
+
+.notif-toast-close {
+    font-family: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.notif-toast-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 .terminal-tab.active {
