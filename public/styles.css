@@ -311,6 +311,17 @@ body {
     display: inline-flex;
 }
 
+/* En items seleccionados (fondo azul), el muted gris no contrasta:
+   usamos blanco translúcido y un hover más visible. */
+.tree-item.active .copy-path-btn {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.tree-item.active .copy-path-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.18);
+}
+
 .file-icon {
     display: inline-flex;
     align-items: center;

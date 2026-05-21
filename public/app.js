@@ -1746,6 +1746,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // Abrir en navegador (HTML servido localmente)
+        if (tabData.isHtml && tabData.isNode && tabData.path) {
+            const openExtItem = document.createElement('div');
+            openExtItem.className = 'tab-context-menu-item';
+            openExtItem.innerHTML = `
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M14 3h7v7M10 14L21 3M5 5h6M5 12h4M5 19h14"/>
+                </svg>
+                Abrir en navegador
+            `;
+            openExtItem.addEventListener('click', async () => {
+                removeContextMenu();
+                const ok = await window.api?.openPathInBrowser(tabData.path);
+                if (!ok) showToast('No se pudo abrir el archivo en el navegador', 'warning');
+            });
+            menu.appendChild(openExtItem);
+        }
+
         // Copiar URL para prototipos
         if (tabData.protoFolderPath && tabData.codaEmbedUrl) {
             const copyUrlItem = document.createElement('div');

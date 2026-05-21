@@ -378,6 +378,23 @@ ipcMain.handle('open-external', async (event, url) => {
     return false;
 });
 
+// Abrir un fichero .html del workspace local en el navegador del SO.
+// Valida que la ruta resuelta esté dentro del ROOT_DIR de la ventana
+// y que la extensión sea html/htm — evita exponer un open-arbitrary-file.
+ipcMain.handle('open-path-in-browser', async (event, relPath) => {
+    if (typeof relPath !== 'string' || !relPath) return false;
+    const server = getServerFromSender(event.sender.id);
+    if (!server || typeof server.getRootDir !== 'function') return false;
+    const rootDir = server.getRootDir();
+    const safePath = path.resolve(rootDir, relPath);
+    if (safePath !== rootDir && !safePath.startsWith(rootDir + path.sep)) return false;
+    const lower = safePath.toLowerCase();
+    if (!lower.endsWith('.html') && !lower.endsWith('.htm')) return false;
+    if (!fs.existsSync(safePath) || !fs.statSync(safePath).isFile()) return false;
+    await shell.openExternal('file://' + safePath);
+    return true;
+});
+
 ipcMain.on('set-window-title', (event, data) => {
     const senderId = event.sender.id;
     const targetWindow = windowData.get(senderId)?.window;

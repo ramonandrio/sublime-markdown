@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('api', {
     // Otros protocolos devuelven false sin abrir nada.
     openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
+    // Abre un fichero .html del workspace local en el navegador del SO.
+    // Path relativo al ROOT_DIR; validado en main.
+    openPathInBrowser: (relPath) => ipcRenderer.invoke('open-path-in-browser', relPath),
+
     codaApiRequest:   (payload) => ipcRenderer.invoke('coda-api-request', payload),
     notionApiRequest: (payload) => ipcRenderer.invoke('notion-api-request', payload),
 
