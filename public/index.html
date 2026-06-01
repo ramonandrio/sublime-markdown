@@ -424,8 +424,8 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 
     <!-- Módulos de la aplicación -->
-    <script src="chat.js?v=9"></script>
-    <script src="app.js?v=9"></script>
+    <script src="chat.js?v=15"></script>
+    <script src="app.js?v=15"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;">
@@ -485,6 +485,37 @@
                             <button id="notionApiKeySave" class="settings-btn-primary">Guardar y conectar</button>
                             <button id="notionApiKeyRemove" class="settings-btn-danger" style="display:none;">Desconectar</button>
                             <span id="notionApiKeyStatus" class="settings-status"></span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Modelo local (Ollama) -->
+                <section class="settings-section">
+                    <div class="settings-section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M8 20h8M12 16v4"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/></svg>
+                        Modelo local (Ollama)
+                    </div>
+                    <div class="settings-field">
+                        <label for="llmEndpointInput">Endpoint</label>
+                        <p class="settings-hint">
+                            Conecta tu Ollama local para usar modelos como llama3 o mistral desde un terminal integrado. Instala Ollama desde <a href="https://ollama.com" target="_blank">ollama.com</a> y arráncalo antes de detectar.
+                        </p>
+                        <div class="settings-input-row">
+                            <input id="llmEndpointInput" type="text" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false" />
+                            <button id="llmDetectBtn" class="settings-icon-btn" title="Detectar modelos">
+                                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 10a8 8 0 0114-3M20 14a8 8 0 01-14 3"/></svg>
+                            </button>
+                        </div>
+                        <label for="llmModelSelect" style="margin-top:10px;">Modelo por defecto</label>
+                        <div class="settings-input-row">
+                            <select id="llmModelSelect" disabled>
+                                <option value="">— Pulsa Detectar primero —</option>
+                            </select>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="llmSaveBtn" class="settings-btn-primary">Guardar</button>
+                            <button id="llmForgetBtn" class="settings-btn-danger" style="display:none;">Olvidar</button>
+                            <span id="llmStatus" class="settings-status"></span>
                         </div>
                     </div>
                 </section>

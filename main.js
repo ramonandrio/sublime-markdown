@@ -481,6 +481,55 @@ ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GE
     });
 });
 
+// ---- Ollama API proxy (localhost or remote) ----
+// Sólo para inspección (listar modelos vía /api/tags). La conversación la
+// lleva el CLI `ollama` dentro de un terminal — aquí no proxyamos chat ni
+// streaming. Timeout corto: si Ollama no está corriendo, el "Detectar"
+// debe fallar rápido sin congelar la UI.
+const OLLAMA_TIMEOUT_MS = 3000;
+
+ipcMain.handle('ollama-api-request', async (event, { endpoint, path: apiPath, method = 'GET', body = null } = {}) => {
+    let url;
+    try {
+        url = new URL(apiPath || '/api/tags', endpoint || 'http://localhost:11434');
+    } catch {
+        return { ok: false, error: 'Endpoint inválido', data: null };
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return { ok: false, error: 'Endpoint debe ser http(s)', data: null };
+    }
+    const lib = url.protocol === 'https:' ? require('https') : require('http');
+    return new Promise((resolve) => {
+        const options = {
+            hostname: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? 443 : 80),
+            path: url.pathname + url.search,
+            method,
+            headers: { 'Accept': 'application/json' }
+        };
+        if (body) options.headers['Content-Type'] = 'application/json';
+
+        const req = lib.request(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
+                } catch {
+                    resolve({ ok: false, status: res.statusCode, data: null });
+                }
+            });
+        });
+        req.setTimeout(OLLAMA_TIMEOUT_MS, () => {
+            req.destroy();
+            resolve({ ok: false, error: 'timeout', data: null });
+        });
+        req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
+        if (body) req.write(JSON.stringify(body));
+        req.end();
+    });
+});
+
 // === TERMINAL NOTIFICATIONS ===
 // El paneId viaja end-to-end (renderer → main → notif → click → renderer)
 // para que al clicar la notif aterricemos en la pestaña + pane exactos.

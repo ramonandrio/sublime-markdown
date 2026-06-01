@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('api', {
     codaApiRequest:   (payload) => ipcRenderer.invoke('coda-api-request', payload),
     notionApiRequest: (payload) => ipcRenderer.invoke('notion-api-request', payload),
 
+    // Proxy HTTP a Ollama (típicamente http://localhost:11434). Sólo para
+    // listar modelos — la conversación la lleva el CLI `ollama` en un terminal.
+    ollamaApiRequest: (payload) => ipcRenderer.invoke('ollama-api-request', payload),
+
     protoServerStart: (folderPath) => ipcRenderer.invoke('proto-server-start', folderPath),
     protoServerStop:  (folderPath) => ipcRenderer.invoke('proto-server-stop', folderPath),
 
