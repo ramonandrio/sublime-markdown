@@ -603,31 +603,40 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.terminalCtrl.openTerminal();
             }
         });
-        // Right-click: elegir perfil
+        // Right-click: elegir perfil. Reutilizamos PANE_PROFILES y el
+        // renderer dinámico de chat.js para no duplicar la lógica de Aider/Ollama.
         if (menuTerminalDropdown) {
-            const profiles = [
-                { id: 'terminal', label: 'Terminal',  icon: '>' },
-                { id: 'claude',   label: 'Claude',    icon: '✦' },
-                { id: 'gemini',   label: 'Gemini',    icon: '◆' },
-                { id: 'openai',   label: 'ChatGPT',   icon: '●' },
-            ];
+            const tc = window.terminalCtrl;
+            const profiles = tc?.PANE_PROFILES || [];
             for (const profile of profiles) {
+                if (profile.dynamic) continue;
                 const item = document.createElement('button');
                 item.className = 'pane-profile-item';
                 item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
                 item.addEventListener('click', (e) => {
                     e.stopPropagation();
                     menuTerminalDropdown.classList.remove('open');
-                    if (window.terminalCtrl) window.terminalCtrl.openTerminal({ profile: profile.id });
+                    tc?.openTerminal({ profile: profile.id });
                 });
                 menuTerminalDropdown.appendChild(item);
             }
-            openTerminalMenuBtn.addEventListener('contextmenu', (e) => {
+            const dynamicSection = document.createElement('div');
+            dynamicSection.className = 'pane-profile-dynamic-section';
+            menuTerminalDropdown.appendChild(dynamicSection);
+
+            openTerminalMenuBtn.addEventListener('contextmenu', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
                     if (d !== menuTerminalDropdown) d.classList.remove('open');
                 });
+                const willOpen = !menuTerminalDropdown.classList.contains('open');
+                if (willOpen && tc?.renderDynamicProfileItems) {
+                    await tc.renderDynamicProfileItems(dynamicSection, (opts) => {
+                        menuTerminalDropdown.classList.remove('open');
+                        tc.openTerminal(opts);
+                    });
+                }
                 const isOpen = menuTerminalDropdown.classList.toggle('open');
                 if (isOpen) {
                     const btnRect = openTerminalMenuBtn.getBoundingClientRect();
@@ -2928,11 +2937,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const notionRemoveBtn    = document.getElementById('notionApiKeyRemove');
         const notionStatusEl     = document.getElementById('notionApiKeyStatus');
 
+        // LLM (Ollama) Elements
+        const llmEndpointInput = document.getElementById('llmEndpointInput');
+        const llmDetectBtn     = document.getElementById('llmDetectBtn');
+        const llmModelSelect   = document.getElementById('llmModelSelect');
+        const llmSaveBtn       = document.getElementById('llmSaveBtn');
+        const llmForgetBtn     = document.getElementById('llmForgetBtn');
+        const llmStatusEl      = document.getElementById('llmStatus');
+
         if (!modal || !settingsBtn) return;
 
         // ---- Persist API keys in IndexedDB via the existing WorkspaceDB ----
         const CODA_KEY_STORE = 'coda_api_key';
         const NOTION_KEY_STORE = 'notion_api_key';
+        const LLM_ENDPOINT_STORE = 'llm_endpoint';
+        const LLM_MODEL_STORE    = 'llm_model';
+        const OLLAMA_DEFAULT_ENDPOINT = 'http://localhost:11434';
 
         async function loadApiKey(storeName) {
             try {
@@ -3030,6 +3050,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     setStatus(notionStatusEl, '', '');
                 }
             });
+
+            // Ollama
+            loadOllamaSettings();
         }
 
         function closeModal() { modal.style.display = 'none'; }
@@ -3117,6 +3140,100 @@ document.addEventListener('DOMContentLoaded', () => {
             notionRemoveBtn.style.display = 'none';
             setStatus(notionStatusEl, 'Desconectado', '');
             clearNotionApiTree();
+        });
+
+        // ---- Ollama: load, detect, save, forget ----
+        async function loadOllamaSettings() {
+            const endpoint = await loadApiKey(LLM_ENDPOINT_STORE);
+            const model    = await loadApiKey(LLM_MODEL_STORE);
+            llmEndpointInput.value = endpoint || '';
+
+            if (endpoint && model) {
+                llmForgetBtn.style.display = 'inline-flex';
+                setStatus(llmStatusEl, '✓ Conectado a ' + model, 'ok');
+                // Auto-detect to repopulate the model list (preselects saved model)
+                detectOllamaModels(model);
+            } else {
+                llmForgetBtn.style.display = 'none';
+                setStatus(llmStatusEl, '', '');
+                resetModelSelect('— Pulsa el botón de la derecha para detectar —');
+            }
+        }
+
+        function resetModelSelect(placeholder) {
+            llmModelSelect.innerHTML = '';
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = placeholder;
+            llmModelSelect.appendChild(opt);
+            llmModelSelect.disabled = true;
+        }
+
+        async function detectOllamaModels(preselectModel) {
+            if (!api?.ollamaApiRequest) {
+                setStatus(llmStatusEl, 'Sólo disponible en la app de escritorio', 'err');
+                return;
+            }
+            const endpoint = (llmEndpointInput.value.trim() || OLLAMA_DEFAULT_ENDPOINT);
+            setStatus(llmStatusEl, 'Detectando…', '');
+            llmDetectBtn.disabled = true;
+            const res = await api.ollamaApiRequest({ endpoint, path: '/api/tags' });
+            llmDetectBtn.disabled = false;
+
+            if (!res?.ok || !Array.isArray(res.data?.models)) {
+                resetModelSelect('— Pulsa el botón de la derecha para detectar —');
+                const reason = res?.error === 'timeout' ? 'sin respuesta' : (res?.error || `HTTP ${res?.status || '?'}`);
+                setStatus(llmStatusEl, `No se pudo conectar a ${endpoint} (${reason})`, 'err');
+                return;
+            }
+            const models = res.data.models;
+            llmModelSelect.innerHTML = '';
+            if (models.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '— Sin modelos. Ejecuta `ollama pull <modelo>` —';
+                llmModelSelect.appendChild(opt);
+                llmModelSelect.disabled = true;
+                setStatus(llmStatusEl, 'Conectado, pero no hay modelos instalados', 'err');
+                return;
+            }
+            for (const m of models) {
+                const opt = document.createElement('option');
+                opt.value = m.name;
+                opt.textContent = m.name;
+                llmModelSelect.appendChild(opt);
+            }
+            llmModelSelect.disabled = false;
+            if (preselectModel && models.some(m => m.name === preselectModel)) {
+                llmModelSelect.value = preselectModel;
+            }
+            setStatus(llmStatusEl, `${models.length} modelo${models.length === 1 ? '' : 's'} detectado${models.length === 1 ? '' : 's'}`, 'ok');
+        }
+
+        llmDetectBtn.addEventListener('click', () => detectOllamaModels());
+
+        llmSaveBtn.addEventListener('click', async () => {
+            const endpoint = llmEndpointInput.value.trim() || OLLAMA_DEFAULT_ENDPOINT;
+            const model    = llmModelSelect.value;
+            if (!model) {
+                setStatus(llmStatusEl, 'Selecciona un modelo (pulsa Detectar)', 'err');
+                return;
+            }
+            await saveApiKey(LLM_ENDPOINT_STORE, endpoint);
+            await saveApiKey(LLM_MODEL_STORE, model);
+            llmForgetBtn.style.display = 'inline-flex';
+            setStatus(llmStatusEl, '✓ Conectado a ' + model, 'ok');
+            window.dispatchEvent(new CustomEvent('llm-config-changed'));
+        });
+
+        llmForgetBtn.addEventListener('click', async () => {
+            await deleteApiKey(LLM_ENDPOINT_STORE);
+            await deleteApiKey(LLM_MODEL_STORE);
+            llmEndpointInput.value = '';
+            llmForgetBtn.style.display = 'none';
+            resetModelSelect('— Pulsa el botón de la derecha para detectar —');
+            setStatus(llmStatusEl, 'Olvidado', '');
+            window.dispatchEvent(new CustomEvent('llm-config-changed'));
         });
 
         // ---- Bootstrap on load ----

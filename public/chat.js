@@ -33,12 +33,62 @@ const IDLE_MS = 8000;
 const COMMAND_DURATION_THRESHOLD_MS = 5000;
 
 // Perfiles de arranque para terminales
+// Ollama, Aider y OpenCode resuelven su comando dinámicamente desde
+// la config guardada en IndexedDB (endpoint + modelo), de ahí command: null.
 const PANE_PROFILES = [
     { id: 'terminal', label: 'Terminal',  icon: '>', command: null },
     { id: 'claude',   label: 'Claude',    icon: '✦', command: '$HOME/.local/bin/claude --dangerously-skip-permissions' },
     { id: 'gemini',   label: 'Gemini',    icon: '◆', command: 'gemini' },
     { id: 'openai',   label: 'ChatGPT',   icon: '●', command: 'chatgpt' },
+    { id: 'aider',    label: 'Aider',     icon: '⚒', command: null, dynamic: true },
+    { id: 'opencode', label: 'OpenCode',  icon: '◈', command: null, dynamic: true },
+    { id: 'ollama',   label: 'Ollama',    icon: '◯', command: null, dynamic: true },
 ];
+
+const OLLAMA_DEFAULT_ENDPOINT = 'http://localhost:11434';
+// Caché en memoria del resultado de /api/tags (modelos disponibles).
+// 60 s es razonable: el usuario no instala/borra modelos cada segundo.
+const OLLAMA_TAGS_CACHE_MS = 60_000;
+
+// Lee endpoint+modelo guardados en IndexedDB sin depender de app.js.
+// Esquema: DB 'MarkdownViewerDB' v3, store 'settings' con keyPath 'key'.
+function loadLlmSettings() {
+    return new Promise((resolve) => {
+        try {
+            const req = indexedDB.open('MarkdownViewerDB', 3);
+            req.onerror = () => resolve({ endpoint: null, model: null });
+            req.onsuccess = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains('settings')) {
+                    db.close();
+                    return resolve({ endpoint: null, model: null });
+                }
+                const tx = db.transaction('settings', 'readonly');
+                const store = tx.objectStore('settings');
+                const epReq = store.get('llm_endpoint');
+                const mReq  = store.get('llm_model');
+                let pending = 2;
+                let endpoint = null, model = null;
+                const done = () => { if (--pending === 0) { db.close(); resolve({ endpoint, model }); } };
+                epReq.onsuccess = () => { endpoint = epReq.result?.value || null; done(); };
+                epReq.onerror   = done;
+                mReq.onsuccess  = () => { model = mReq.result?.value || null; done(); };
+                mReq.onerror    = done;
+            };
+        } catch {
+            resolve({ endpoint: null, model: null });
+        }
+    });
+}
+
+// Escape conservador para nombres de modelo (sólo caracteres seguros).
+// Si el usuario llama a su modelo `llama3.1:latest`, esto pasa intacto.
+// Cualquier otra cosa se cuotea con comillas simples para que el shell
+// no interprete metacaracteres.
+function shellEscapeArg(s) {
+    if (/^[A-Za-z0-9._:/-]+$/.test(s)) return s;
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
 
 // Temas de terminal por pane (inspirados en macOS Terminal.app)
 const PANE_THEMES = {
@@ -186,6 +236,14 @@ class TerminalController {
         // Callback para comunicación bidireccional con app.js
         this.onTerminalActivated = null;
 
+        // Caché de /api/tags por endpoint. Forma: { endpoint, models, at }.
+        // Invalidada por el evento 'llm-config-changed' (cuando el usuario
+        // guarda/olvida en Ajustes) o por su propia edad (60 s).
+        this._ollamaTagsCache = null;
+        window.addEventListener('llm-config-changed', () => {
+            this._ollamaTagsCache = null;
+        });
+
         const init = () => {
             this.panel          = document.getElementById('bottomTerminalPanel');
             this.resizer        = document.getElementById('horizontalResizer');
@@ -196,7 +254,12 @@ class TerminalController {
             const newTabBtn = document.getElementById('newTerminalBtn');
             const newTabDropdown = document.getElementById('newTabProfileDropdown');
             if (newTabBtn && newTabDropdown) {
+                // Items fijos: Terminal, Claude, Gemini, ChatGPT.
+                // Aider + Ollama se renderizan dinámicamente al abrir el
+                // dropdown (lazy fetch de /api/tags con caché de 60 s, lee
+                // la config Ollama de IndexedDB para decidir habilitado/no).
                 for (const profile of PANE_PROFILES) {
+                    if (profile.dynamic) continue;
                     const item = document.createElement('button');
                     item.className = 'pane-profile-item';
                     item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
@@ -207,13 +270,26 @@ class TerminalController {
                     });
                     newTabDropdown.appendChild(item);
                 }
+                // Contenedor para los items dinámicos (Aider + Ollama)
+                const dynamicProfilesSection = document.createElement('div');
+                dynamicProfilesSection.className = 'pane-profile-dynamic-section';
+                newTabDropdown.appendChild(dynamicProfilesSection);
+
                 newTabBtn.addEventListener('click', () => this.createTab());
-                newTabBtn.addEventListener('contextmenu', (e) => {
+                newTabBtn.addEventListener('contextmenu', async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
                         if (d !== newTabDropdown) d.classList.remove('open');
                     });
+                    const willOpen = !newTabDropdown.classList.contains('open');
+                    if (willOpen) {
+                        // Render items dinámicos antes de abrir (la posición depende del scrollHeight)
+                        await this._renderDynamicProfileItems(dynamicProfilesSection, (opts) => {
+                            newTabDropdown.classList.remove('open');
+                            this.createTab(opts);
+                        });
+                    }
                     const isOpen = newTabDropdown.classList.toggle('open');
                     if (isOpen) {
                         const btnRect = newTabBtn.getBoundingClientRect();
@@ -341,7 +417,10 @@ class TerminalController {
     // Toast in-app: aviso visible pero no invasivo cuando la app tiene foco
     // pero el pane idle no es el activo. Un único slot — toasts nuevos
     // reemplazan al anterior. Auto-dismiss a los 5s.
-    _showToast(ptyId, title, body) {
+    // customAction (opcional): { label, onClick } — sustituye el "Ir → pane"
+    // por una acción a medida (ej. abrir Ajustes cuando el toast es un error
+    // de config, no una notificación de pane idle).
+    _showToast(ptyId, title, body, customAction = null) {
         document.querySelectorAll('.notif-toast').forEach(t => t.remove());
 
         const toast = document.createElement('div');
@@ -360,7 +439,7 @@ class TerminalController {
 
         const action = document.createElement('button');
         action.className = 'notif-toast-action';
-        action.textContent = 'Ir →';
+        action.textContent = customAction?.label || 'Ir →';
 
         const close = document.createElement('button');
         close.className = 'notif-toast-close';
@@ -371,9 +450,11 @@ class TerminalController {
         toast.appendChild(action);
         toast.appendChild(close);
 
-        const goToPane = () => { this._focusPane(ptyId); toast.remove(); };
-        text.addEventListener('click', goToPane);
-        action.addEventListener('click', goToPane);
+        const onActivate = customAction?.onClick
+            ? () => { try { customAction.onClick(); } finally { toast.remove(); } }
+            : () => { this._focusPane(ptyId); toast.remove(); };
+        text.addEventListener('click', onActivate);
+        action.addEventListener('click', onActivate);
         close.addEventListener('click', (e) => { e.stopPropagation(); toast.remove(); });
 
         document.body.appendChild(toast);
@@ -584,7 +665,7 @@ class TerminalController {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile);
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel });
         }));
     }
 
@@ -911,8 +992,10 @@ class TerminalController {
             const btn = picker.querySelector('.pane-btn');
             const dropdown = picker.querySelector('.pane-profile-dropdown');
 
-            // Construir items del dropdown de perfiles
+            // Items fijos (Terminal/Claude/Gemini/ChatGPT). Aider y Ollama
+            // se renderizan dinámicamente en cada apertura del contextmenu.
             for (const profile of PANE_PROFILES) {
+                if (profile.dynamic) continue;
                 const item = document.createElement('button');
                 item.className = 'pane-profile-item';
                 item.innerHTML = `<span class="pane-profile-icon">${profile.icon}</span>${profile.label}`;
@@ -923,19 +1006,29 @@ class TerminalController {
                 });
                 dropdown.appendChild(item);
             }
+            const dynamicSection = document.createElement('div');
+            dynamicSection.className = 'pane-profile-dynamic-section';
+            dropdown.appendChild(dynamicSection);
 
             // Click: split directo con terminal. Hold/right-click: mostrar perfiles
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.splitPane(ptyId, dir);
             });
-            btn.addEventListener('contextmenu', (e) => {
+            btn.addEventListener('contextmenu', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 // Cerrar otros dropdowns
                 document.querySelectorAll('.pane-profile-dropdown.open, .pane-theme-dropdown.open').forEach(d => {
                     if (d !== dropdown) d.classList.remove('open');
                 });
+                const willOpen = !dropdown.classList.contains('open');
+                if (willOpen) {
+                    await this._renderDynamicProfileItems(dynamicSection, (opts) => {
+                        dropdown.classList.remove('open');
+                        this.splitPane(ptyId, dir, opts);
+                    });
+                }
                 const isOpen = dropdown.classList.toggle('open');
                 if (isOpen) {
                     const btnRect = btn.getBoundingClientRect();
@@ -1168,19 +1261,226 @@ class TerminalController {
     }
 
     // ── Ejecutar comando de perfil en un pane ──────────────────────────────
-    _execProfile(ptyId, profileId) {
+    async _execProfile(ptyId, profileId, opts = {}) {
         if (!profileId || profileId === 'terminal') return;
         const profile = PANE_PROFILES.find(p => p.id === profileId);
-        if (!profile?.command) return;
+        if (!profile) return;
+
+        let commandToType = profile.command;
+        let paneLabel = profile.label;
+
+        const openSettingsAction = {
+            label: 'Abrir Ajustes',
+            onClick: () => document.getElementById('settingsBtn')?.click()
+        };
+
+        if (profile.id === 'ollama') {
+            const resolved = await this._resolveOllamaCommand(opts.ollamaModel);
+            if (resolved.error) {
+                this._showToast(ptyId, 'Ollama', resolved.error, openSettingsAction);
+                return;
+            }
+            commandToType = resolved.command;
+            paneLabel = `Ollama (${resolved.modelLabel})`;
+        } else if (profile.id === 'aider') {
+            const resolved = await this._resolveAiderCommand();
+            if (resolved.error) {
+                this._showToast(ptyId, 'Aider', resolved.error, openSettingsAction);
+                return;
+            }
+            commandToType = resolved.command;
+            paneLabel = `Aider (${resolved.modelLabel})`;
+        } else if (profile.id === 'opencode') {
+            const resolved = await this._resolveOpenCodeCommand();
+            if (resolved.error) {
+                this._showToast(ptyId, 'OpenCode', resolved.error, openSettingsAction);
+                return;
+            }
+            commandToType = resolved.command;
+            paneLabel = `OpenCode (${resolved.modelLabel})`;
+        }
+
+        if (!commandToType) return;
+
         // Pequeño delay para que el shell esté listo
         setTimeout(() => {
-            this.api?.terminalInput(ptyId, profile.command + '\n');
+            this.api?.terminalInput(ptyId, commandToType + '\n');
         }, 300);
-        // Actualizar título del pane
         const pane = this.panes.get(ptyId);
         if (pane) {
             const title = pane.leafNode.el.querySelector('.pane-title');
-            if (title) title.textContent = profile.label;
+            if (title) title.textContent = paneLabel;
+        }
+    }
+
+    // ── Ollama: resolver comando para el profile ──────────────────────────
+    // Lee endpoint+modelo de IndexedDB. Si el endpoint no es el default,
+    // antepone OLLAMA_HOST=... para que el CLI apunte al servidor configurado.
+    async _resolveOllamaCommand(modelOverride) {
+        const { endpoint, model } = await loadLlmSettings();
+        const ep    = endpoint || OLLAMA_DEFAULT_ENDPOINT;
+        const chosen = modelOverride || model;
+        if (!chosen) {
+            return { error: 'Configura Ollama en Ajustes primero' };
+        }
+        const safeModel = shellEscapeArg(chosen);
+        let command = `ollama run ${safeModel}`;
+        if (ep !== OLLAMA_DEFAULT_ENDPOINT) {
+            // OLLAMA_HOST acepta "host:port" sin esquema
+            const host = ep.replace(/^https?:\/\//, '').replace(/\/$/, '');
+            command = `OLLAMA_HOST=${shellEscapeArg(host)} ${command}`;
+        }
+        return { command, modelLabel: chosen };
+    }
+
+    // ── Aider: resolver comando bound al modelo Ollama configurado ────────
+    // Aider habla con Ollama vía el prefijo `ollama_chat/<model>`. Para
+    // endpoint remoto se exporta OLLAMA_API_BASE (no OLLAMA_HOST: el
+    // primero lo lee la librería litellm que usa aider, el segundo es para
+    // el CLI `ollama` puro).
+    async _resolveAiderCommand() {
+        const { endpoint, model } = await loadLlmSettings();
+        if (!model) {
+            return { error: 'Configura Ollama en Ajustes primero (Aider usa tu modelo Ollama por defecto)' };
+        }
+        // aider (vía litellm) siempre quiere OLLAMA_API_BASE definida, incluso
+        // apuntando al default. Si no, suelta un warning al arrancar.
+        const ep = (endpoint || OLLAMA_DEFAULT_ENDPOINT).replace(/\/$/, '');
+        const safeModel = shellEscapeArg(`ollama_chat/${model}`);
+        const safeEp    = shellEscapeArg(ep);
+        return {
+            command: `OLLAMA_API_BASE=${safeEp} aider --model ${safeModel}`,
+            modelLabel: model
+        };
+    }
+
+    // ── OpenCode: resolver comando bound al modelo Ollama configurado ─────
+    // `ollama launch opencode` se ocupa de instalar/configurar OpenCode
+    // contra el daemon local. Si endpoint no es default, OLLAMA_HOST hace
+    // que el CLI ollama apunte al servidor remoto.
+    async _resolveOpenCodeCommand() {
+        const { endpoint, model } = await loadLlmSettings();
+        if (!model) {
+            return { error: 'Configura Ollama en Ajustes primero (OpenCode usa tu modelo Ollama por defecto)' };
+        }
+        const ep = (endpoint || OLLAMA_DEFAULT_ENDPOINT).replace(/\/$/, '');
+        const safeModel = shellEscapeArg(model);
+        let command = `ollama launch opencode --model ${safeModel}`;
+        if (ep !== OLLAMA_DEFAULT_ENDPOINT) {
+            const host = ep.replace(/^https?:\/\//, '');
+            command = `OLLAMA_HOST=${shellEscapeArg(host)} ${command}`;
+        }
+        return { command, modelLabel: model };
+    }
+
+    // ── Ollama: fetch /api/tags con caché en memoria ──────────────────────
+    async _fetchOllamaModels(endpoint) {
+        const now = Date.now();
+        if (this._ollamaTagsCache
+            && this._ollamaTagsCache.endpoint === endpoint
+            && (now - this._ollamaTagsCache.at) < OLLAMA_TAGS_CACHE_MS) {
+            return this._ollamaTagsCache.models;
+        }
+        if (!this.api?.ollamaApiRequest) return null;
+        const res = await this.api.ollamaApiRequest({ endpoint, path: '/api/tags' });
+        if (!res?.ok || !Array.isArray(res.data?.models)) return null;
+        const models = res.data.models.map(m => m.name);
+        this._ollamaTagsCache = { endpoint, models, at: now };
+        return models;
+    }
+
+    // ── Pintar entradas dinámicas (Aider + Ollama) en cualquier dropdown ──
+    // onProfileSelect(opts) recibe {profile, ollamaModel?} cuando el usuario
+    // clica un item habilitado. El caller decide qué hacer (createTab,
+    // splitPane, openTerminal…) y se ocupa de cerrar su propio dropdown.
+    async _renderDynamicProfileItems(containerEl, onProfileSelect) {
+        containerEl.innerHTML = '';
+
+        const { endpoint, model: defaultModel } = await loadLlmSettings();
+        const ep = endpoint || OLLAMA_DEFAULT_ENDPOINT;
+        const ollamaConfigured = !!(endpoint && defaultModel);
+
+        const mkDisabled = (label) => {
+            const item = document.createElement('button');
+            item.className = 'pane-profile-item';
+            item.disabled = true;
+            item.style.opacity = '0.55';
+            item.style.cursor = 'default';
+            item.innerHTML = `<span class="pane-profile-icon">◯</span>${label}`;
+            return item;
+        };
+
+        // --- Aider (agente con confirmación, usa el modelo Ollama por defecto) ---
+        const aiderItem = document.createElement('button');
+        aiderItem.className = 'pane-profile-item';
+        const aiderIcon = document.createElement('span');
+        aiderIcon.className = 'pane-profile-icon';
+        aiderIcon.textContent = '⚒';
+        aiderItem.appendChild(aiderIcon);
+        if (ollamaConfigured) {
+            aiderItem.appendChild(document.createTextNode(`Aider (${defaultModel})`));
+            aiderItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onProfileSelect({ profile: 'aider' });
+            });
+        } else {
+            aiderItem.appendChild(document.createTextNode('Aider (configura Ollama)'));
+            aiderItem.disabled = true;
+            aiderItem.style.opacity = '0.55';
+            aiderItem.style.cursor = 'default';
+        }
+        containerEl.appendChild(aiderItem);
+
+        // --- OpenCode (agente autónomo tipo Claude Code, vía ollama launch) ---
+        const opencodeItem = document.createElement('button');
+        opencodeItem.className = 'pane-profile-item';
+        const opencodeIcon = document.createElement('span');
+        opencodeIcon.className = 'pane-profile-icon';
+        opencodeIcon.textContent = '◈';
+        opencodeItem.appendChild(opencodeIcon);
+        if (ollamaConfigured) {
+            opencodeItem.appendChild(document.createTextNode(`OpenCode (${defaultModel})`));
+            opencodeItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onProfileSelect({ profile: 'opencode' });
+            });
+        } else {
+            opencodeItem.appendChild(document.createTextNode('OpenCode (configura Ollama)'));
+            opencodeItem.disabled = true;
+            opencodeItem.style.opacity = '0.55';
+            opencodeItem.style.cursor = 'default';
+        }
+        containerEl.appendChild(opencodeItem);
+
+        // --- Ollama (chat REPL por modelo) ---
+        if (!ollamaConfigured) {
+            containerEl.appendChild(mkDisabled('Ollama (configura en Ajustes)'));
+            return;
+        }
+
+        const models = await this._fetchOllamaModels(ep);
+        if (!models) {
+            containerEl.appendChild(mkDisabled('Ollama (no detectado)'));
+            return;
+        }
+
+        // Default primero (con ★), luego el resto.
+        const ordered = [defaultModel, ...models.filter(m => m !== defaultModel)];
+        for (const m of ordered) {
+            const item = document.createElement('button');
+            item.className = 'pane-profile-item';
+            const isDefault = m === defaultModel;
+            const star = isDefault ? ' ★' : '';
+            const icon = document.createElement('span');
+            icon.className = 'pane-profile-icon';
+            icon.textContent = '◯';
+            item.appendChild(icon);
+            item.appendChild(document.createTextNode(`Ollama: ${m}${star}`));
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onProfileSelect({ profile: 'ollama', ollamaModel: m });
+            });
+            containerEl.appendChild(item);
         }
     }
 
@@ -1250,7 +1550,7 @@ class TerminalController {
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile);
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel });
         }));
     }
 
@@ -1713,3 +2013,7 @@ class TerminalController {
 }
 
 window.terminalCtrl = new TerminalController();
+// API pública para que otros scripts (app.js) puedan reusar el listado de
+// profiles y el renderer dinámico sin duplicar lógica de Aider/Ollama.
+window.terminalCtrl.PANE_PROFILES = PANE_PROFILES;
+window.terminalCtrl.renderDynamicProfileItems = window.terminalCtrl._renderDynamicProfileItems.bind(window.terminalCtrl);
