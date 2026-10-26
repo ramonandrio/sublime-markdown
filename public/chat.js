@@ -2381,6 +2381,15 @@ class TerminalController {
         const a = pane.agent || (pane.agent = {});
         a.hooksSeen = true;
         if (p.cwd) a.cwd = p.cwd;
+        // Eventos casi simultáneos pueden llegar desordenados: uno anterior al
+        // último aplicado no cambia el estado (solo aporta datos sueltos).
+        if (a.lastAt && p.at < a.lastAt) {
+            if (p.event === 'PreToolUse' && /\/\.objetivos\/[^/]+\.md$/.test(p.filePath || '')) a.recordPath = p.filePath;
+            if (p.event === 'Stop' && p.lastMessage) a.lastMessage = p.lastMessage;
+            this._scheduleRecordRead(pane);
+            return;
+        }
+        a.lastAt = p.at;
 
         switch (p.event) {
             case 'SessionStart':
@@ -2396,6 +2405,11 @@ class TerminalController {
                 this._setAgentState(pane, 'working', p.at);
                 a.tool = p.tool || null;
                 a.toolTarget = p.toolTarget || null;
+                // La skill /objetivo escribe su registro en .objetivos/<nombre>.md:
+                // a partir de ahí la tarjeta muestra el objetivo y su paso.
+                if (/^(Write|Edit|MultiEdit)$/.test(p.tool || '') && /\/\.objetivos\/[^/]+\.md$/.test(p.filePath || '')) {
+                    a.recordPath = p.filePath;
+                }
                 break;
             case 'Notification':
                 // idle_prompt es solo un recordatorio de "tu turno": no cambia nada.
@@ -2433,7 +2447,32 @@ class TerminalController {
                 return;
         }
         this._armStuckTimer(pane);
+        this._scheduleRecordRead(pane);
         this._refreshDashboard();
+    }
+
+    // Relee la cabecera del registro de /objetivo poco después de cada evento
+    // (PreToolUse llega ANTES de escribir, así que se espera un poco).
+    _scheduleRecordRead(pane) {
+        const a = pane.agent;
+        if (!a?.recordPath || !this.api?.objectiveRead) return;
+        clearTimeout(a._recordTimer);
+        a._recordTimer = setTimeout(async () => {
+            const meta = await this.api.objectiveRead(a.recordPath).catch(() => null);
+            if (pane.agent !== a || pane._disposed) return;
+            if (meta) { a.record = meta; this._refreshDashboard(); }
+        }, 1500);
+    }
+
+    // Abre el registro en el visor si está dentro de la carpeta abierta; si no,
+    // con la app por defecto del sistema.
+    _openRecord(filePath) {
+        const root = (localStorage.getItem('pmos_last_folder') || '').normalize('NFC');
+        if (root && filePath.normalize('NFC').startsWith(root + '/') && window.openFileInViewer) {
+            window.openFileInViewer(filePath);
+        } else {
+            this.api?.objectiveOpen?.(filePath);
+        }
     }
 
     // Aviso (toast o notificación nativa) salvo que ya estés mirando ese pane.
@@ -2480,7 +2519,9 @@ class TerminalController {
             } else if (a.state === 'done' || state === 'idle') {
                 detail = a.lastMessage || null;
             }
-            return { state, since: a.since, detail, cwd: a.cwd, exact: true };
+            // Si /objetivo se paró a preguntar, su "esperando" es lo más claro.
+            if (a.record?.esperando && /^(needs_you|done)$/.test(a.state)) detail = a.record.esperando;
+            return { state, since: a.since, detail, cwd: a.cwd, exact: true, record: a.record, recordPath: a.recordPath };
         }
         const sh = pane.shellState;
         if (sh?.commandRunning) {
@@ -2541,11 +2582,26 @@ class TerminalController {
                 this._renderDashboard();
             });
         });
-        this.dashboardGrid.addEventListener('click', (e) => {
+        const activate = (e) => {
+            const recordBtn = e.target.closest('.agent-goal-open');
+            if (recordBtn) {
+                e.stopPropagation();
+                this.toggleDashboard(false);
+                this._openRecord(recordBtn.dataset.record);
+                return;
+            }
             const card = e.target.closest('.agent-card');
             if (!card) return;
             this.toggleDashboard(false);
             this._focusPane(card.dataset.ptyId);
+        };
+        this.dashboardGrid.addEventListener('click', activate);
+        // Las tarjetas son <div role="button">: Enter/Espacio como un botón.
+        this.dashboardGrid.addEventListener('keydown', (e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.agent-card, .agent-goal-open')) {
+                e.preventDefault();
+                activate(e);
+            }
         });
         this.dashboardBtn.addEventListener('click', () => this.toggleDashboard());
         // En captura: xterm consume Escape si el foco sigue en un terminal.
@@ -2631,8 +2687,15 @@ class TerminalController {
                              cwd && `<span title="${escapeHtml(st.cwd)}">${escapeHtml(cwd)}</span>`]
                     .filter(Boolean).join(' · ');
                 const active = tabId === this.activeTabId && tab.activeLeafPtyId === leaf.ptyId;
+                const rec = st.record;
+                const recordHtml = rec ? `
+                        <div class="agent-card-goal">
+                            <span class="agent-goal-text" title="${escapeHtml(rec.objetivo)}">◎ ${escapeHtml(rec.objetivo || 'Objetivo')}</span>
+                            ${rec.paso ? `<span class="agent-goal-step">${escapeHtml(rec.paso)}</span>` : ''}
+                            <button class="agent-goal-open" data-record="${escapeHtml(st.recordPath)}" title="Abrir el registro del objetivo">Registro</button>
+                        </div>` : '';
                 cards.push(`
-                    <button class="agent-card state-${st.state}${active ? ' is-active' : ''}" data-pty-id="${escapeHtml(leaf.ptyId)}">
+                    <div class="agent-card state-${st.state}${active ? ' is-active' : ''}" role="button" tabindex="0" data-pty-id="${escapeHtml(leaf.ptyId)}">
                         <div class="agent-card-top">
                             <span class="agent-dot"></span>
                             <span class="agent-state">${meta.label}</span>
@@ -2641,8 +2704,9 @@ class TerminalController {
                         </div>
                         <div class="agent-card-title">${escapeHtml(title)}</div>
                         ${sub ? `<div class="agent-card-sub">${sub}</div>` : ''}
+                        ${recordHtml}
                         ${st.detail ? `<div class="agent-card-detail">${escapeHtml(st.detail)}</div>` : ''}
-                    </button>`);
+                    </div>`);
             });
         }
         const filters = this.dashboardEl.querySelectorAll('.agent-dash-filter');

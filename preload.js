@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('api', {
     terminalResize: (id, cols, rows)  => ipcRenderer.send('terminal-resize', { id, cols, rows }),
     // Ruta del settings.json con los hooks de estado (o null si no se pudo crear)
     agentHooksSettings: () => ipcRenderer.invoke('agent-hooks-settings'),
+    // Registros de /objetivo: cabecera para el panel y abrir con la app del SO
+    objectiveRead: (filePath) => ipcRenderer.invoke('objective-read', filePath),
+    objectiveOpen: (filePath) => ipcRenderer.invoke('objective-open', filePath),
     terminalNotify: (payload)         => ipcRenderer.send('terminal-notify', payload),
     setWindowTitle: (payload)         => ipcRenderer.send('set-window-title', payload),
 

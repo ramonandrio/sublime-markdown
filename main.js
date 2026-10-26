@@ -650,12 +650,17 @@ function setupAgentStatus() {
         if (!name.endsWith('.evt') || pending.has(name)) return;
         pending.add(name);
         const file = path.join(dir, name);
-        fs.promises.readFile(file, 'utf8')
+        let writtenAt = Date.now();
+        fs.promises.stat(file)
+            .then((st) => { writtenAt = st.mtimeMs; return fs.promises.readFile(file, 'utf8'); })
             .then((raw) => {
                 fs.promises.unlink(file).catch(() => {});
                 const paneId = name.split('.')[0];
                 let payload;
                 try { payload = JSON.parse(raw); } catch { return; }
+                // Hora en que el hook lo escribió: el renderer la usa para
+                // ordenar eventos que llegan casi a la vez (fs.watch no garantiza orden).
+                payload.__writtenAt = writtenAt;
                 const ownerId = require('./terminal-manager').getOwner(paneId);
                 const win = ownerId != null ? windowData.get(ownerId)?.window : null;
                 if (win && !win.isDestroyed()) {
@@ -688,13 +693,54 @@ function slimAgentPayload(p) {
         prompt: clip(p.prompt, 200),
         tool: p.tool_name,
         toolTarget: clip(input.file_path || input.path || input.command || input.pattern || input.url || input.description, 160),
+        filePath: clip(input.file_path, 1000), // ruta completa (p. ej. el registro de /objetivo)
         backgroundTasks: Array.isArray(p.background_tasks) ? p.background_tasks.length : 0,
         error: clip(p.error?.message || p.error, 300),
         source: p.source,
         reason: p.reason,
-        at: Date.now(),
+        at: p.__writtenAt || Date.now(),
     };
 }
+
+// ── Registros de la skill /objetivo (.objetivos/<nombre>.md) ──────────────
+// Solo se aceptan rutas absolutas a un .md directamente dentro de una carpeta
+// `.objetivos`: el renderer no puede usar esto para leer otros ficheros.
+function objectivePath(p) {
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return null;
+    const norm = path.normalize(p);
+    if (!norm.endsWith('.md') || path.basename(path.dirname(norm)) !== '.objetivos') return null;
+    return norm;
+}
+
+// Devuelve los campos de la cabecera (front matter) que pinta el panel.
+ipcMain.handle('objective-read', async (event, p) => {
+    const file = objectivePath(p);
+    if (!file) return null;
+    try {
+        const fh = await fs.promises.open(file, 'r');
+        const { buffer, bytesRead } = await fh.read(Buffer.alloc(8192), 0, 8192, 0);
+        await fh.close();
+        const m = buffer.toString('utf8', 0, bytesRead).match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        if (!m) return null;
+        const meta = {};
+        for (const line of m[1].split(/\r?\n/)) {
+            const kv = line.match(/^(\w+):\s*(.*)$/);
+            // Los comentarios de la plantilla ("   # …") no forman parte del valor.
+            if (kv) meta[kv[1]] = kv[2].replace(/\s{2,}#.*$/, '').trim().slice(0, 300);
+        }
+        return {
+            objetivo: meta.objetivo || '', caso: meta.caso || '', paso: meta.paso || '',
+            estado: meta.estado || '', esperando: meta.esperando || '', actualizado: meta.actualizado || '',
+        };
+    } catch { return null; }
+});
+
+// Abre el registro con la app por defecto (si está fuera de la carpeta del visor).
+ipcMain.handle('objective-open', async (event, p) => {
+    const file = objectivePath(p);
+    if (!file) return false;
+    return (await shell.openPath(file)) === '';
+});
 
 ipcMain.handle('agent-hooks-settings', () => {
     try {

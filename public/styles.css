@@ -2745,3 +2745,45 @@ mark.find-highlight.find-current {
 @media (prefers-reduced-motion: reduce) {
     .agent-card.state-working .agent-dot { animation: none; }
 }
+
+.agent-card-goal {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-darker);
+    font-size: 11px;
+    min-width: 0;
+}
+
+.agent-goal-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.agent-goal-step {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-goal-open {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-dark);
+    color: var(--text-accent);
+    font: 500 11px var(--font-ui);
+    cursor: pointer;
+}
+
+.agent-goal-open:hover {
+    background: var(--bg-hover);
+}
