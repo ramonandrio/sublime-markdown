@@ -13,6 +13,7 @@
  *   killTerminal(id)
  *   resizeTerminal(id, cols, rows)
  *   count(ownerId?)
+ *   getOwner(id)
  *   killByOwner(ownerId)
  *   killAll()
  */
@@ -81,6 +82,9 @@ function startTerminal(cwd, command, onData, onExit, ownerId = null) {
         ...extraEnv
     };
     delete childEnv.CLAUDE_CODE_CHILD_SESSION;
+    // Identifica el PTY ante el hook de estado (shell-integration/compass-status-hook.sh).
+    // COMPASS_STATUS_DIR llega por process.env desde main.js.
+    childEnv.COMPASS_PANE_ID = id;
     delete childEnv.CLAUDE_CODE_SESSION_ID;
 
     // Prefijo para las sesiones de Remote Control auto-nombradas (p. ej. al
@@ -188,6 +192,15 @@ function count(ownerId) {
 }
 
 /**
+ * webContents id of the window that owns a terminal (null if unknown/gone).
+ * @param {string} id - Terminal instance id
+ * @returns {number|null}
+ */
+function getOwner(id) {
+    return terminals.get(id)?.ownerId ?? null;
+}
+
+/**
  * Kill every terminal owned by one window (on reload or close its renderer
  * loses the panes, so the PTYs would otherwise keep running unseen).
  * @param {number} ownerId - webContents id
@@ -234,6 +247,7 @@ module.exports = {
     resizeTerminal,
     killTerminal,
     count,
+    getOwner,
     killByOwner,
     killAll
 };

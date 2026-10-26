@@ -611,8 +611,100 @@ ipcMain.handle('proto-server-stop', async (event, folderPath) => {
     return { ok: true };
 });
 
+// === ESTADO DE SESIONES DE CLAUDE (hooks) ===
+// Las sesiones de Claude lanzadas desde CompassAI llevan `--settings` con unos
+// hooks que ejecutan shell-integration/compass-status-hook.sh. Ese script
+// deja el JSON de cada evento en AGENT_STATUS_DIR como <paneId>.<rnd>.evt;
+// aquí lo leemos, lo borramos y lo reenviamos a la ventana dueña del PTY.
+// Los hooks se SUMAN a los del usuario (~/.claude, proyecto, plugins): no
+// sustituyen nada de su configuración.
+const AGENT_STATUS_DIR = () => path.join(app.getPath('userData'), 'agent-status');
+const AGENT_HOOKS_SETTINGS = () => path.join(app.getPath('userData'), 'claude-status-hooks.json');
+const AGENT_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'Stop', 'StopFailure', 'SessionEnd'];
+
+function setupAgentStatus() {
+    const dir = AGENT_STATUS_DIR();
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        // Restos de una ejecución anterior: los PTYs ya no existen.
+        for (const f of fs.readdirSync(dir)) {
+            try { fs.unlinkSync(path.join(dir, f)); } catch (_) {}
+        }
+        const script = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'),
+            'shell-integration', 'compass-status-hook.sh');
+        const command = `sh ${JSON.stringify(script)}`;
+        const hooks = {};
+        for (const ev of AGENT_HOOK_EVENTS) {
+            hooks[ev] = [{ hooks: [{ type: 'command', command, timeout: 5 }] }];
+        }
+        fs.writeFileSync(AGENT_HOOKS_SETTINGS(), JSON.stringify({ hooks }, null, 2));
+    } catch (err) {
+        warn('[agent-status] no se pudo preparar:', err.message);
+        return;
+    }
+
+    process.env.COMPASS_STATUS_DIR = dir; // lo heredan los PTYs nuevos
+
+    const pending = new Set();
+    const consume = (name) => {
+        if (!name.endsWith('.evt') || pending.has(name)) return;
+        pending.add(name);
+        const file = path.join(dir, name);
+        fs.promises.readFile(file, 'utf8')
+            .then((raw) => {
+                fs.promises.unlink(file).catch(() => {});
+                const paneId = name.split('.')[0];
+                let payload;
+                try { payload = JSON.parse(raw); } catch { return; }
+                const ownerId = require('./terminal-manager').getOwner(paneId);
+                const win = ownerId != null ? windowData.get(ownerId)?.window : null;
+                if (win && !win.isDestroyed()) {
+                    win.webContents.send('agent-status', { paneId, payload: slimAgentPayload(payload) });
+                }
+            })
+            .catch(() => {})
+            .finally(() => pending.delete(name));
+    };
+    try {
+        fs.watch(dir, (_type, name) => { if (name) consume(String(name)); });
+    } catch (err) {
+        warn('[agent-status] fs.watch falló:', err.message);
+    }
+}
+
+// Solo lo que pinta el panel: evita mandar al renderer tool_input enormes
+// (p. ej. el contenido completo de un Write).
+function slimAgentPayload(p) {
+    const clip = (s, n) => (typeof s === 'string' ? (s.length > n ? s.slice(0, n) + '…' : s) : undefined);
+    const input = p.tool_input || {};
+    return {
+        event: p.hook_event_name,
+        sessionId: p.session_id,
+        cwd: p.cwd,
+        transcriptPath: p.transcript_path,
+        message: clip(p.message, 400),
+        notificationType: p.notification_type,
+        lastMessage: clip(p.last_assistant_message, 600),
+        prompt: clip(p.prompt, 200),
+        tool: p.tool_name,
+        toolTarget: clip(input.file_path || input.path || input.command || input.pattern || input.url || input.description, 160),
+        backgroundTasks: Array.isArray(p.background_tasks) ? p.background_tasks.length : 0,
+        error: clip(p.error?.message || p.error, 300),
+        source: p.source,
+        reason: p.reason,
+        at: Date.now(),
+    };
+}
+
+ipcMain.handle('agent-hooks-settings', () => {
+    try {
+        return fs.existsSync(AGENT_HOOKS_SETTINGS()) ? AGENT_HOOKS_SETTINGS() : null;
+    } catch { return null; }
+});
+
 app.whenReady().then(async () => {
     setupMenu();
+    setupAgentStatus();
     pruneTerminalHistory(); // limpiar logs de terminal antiguos al arrancar
     // Start with a generic directory. The frontend will override this via API per window.
     process.env.PMOS_ROOT_DIR = path.resolve(__dirname, '..');

@@ -36,7 +36,7 @@
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 
     <!-- Estilos propios -->
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=4">
 </head>
 
 <body>
@@ -298,6 +298,15 @@
                     </div>
                     <div class="terminal-actions">
 
+                        <button id="agentDashboardBtn" class="action-btn agent-dashboard-btn" title="Panel de sesiones (Ctrl+Shift+S)"
+                            aria-label="Panel de sesiones" style="padding: 4px;">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+                                <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+                            </svg>
+                            <span id="agentDashboardBadge" class="agent-dashboard-badge" hidden></span>
+                        </button>
+
                         <div class="new-tab-picker">
                             <button id="newTerminalBtn" class="action-btn" title="Nueva Instancia de Terminal (click derecho: elegir perfil)"
                                 style="padding: 4px;">
@@ -417,8 +426,8 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 
     <!-- Módulos de la aplicación -->
-    <script src="chat.js?v=16"></script>
-    <script src="app.js?v=16"></script>
+    <script src="chat.js?v=17"></script>
+    <script src="app.js?v=17"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -482,6 +491,18 @@
                             Desactivado por defecto.
                         </p>
                         <span id="claudeSkipPermsStatus" class="settings-status"></span>
+                    </div>
+                    <div class="settings-field">
+                        <label class="settings-checkbox" for="claudeStatusHooksToggle" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                            <input id="claudeStatusHooksToggle" type="checkbox" style="margin-top:3px;" />
+                            <span>Estado de sesiones en el panel (hooks)</span>
+                        </label>
+                        <p class="settings-hint">
+                            Las sesiones de Claude abiertas desde CompassAI avisan de cuándo trabajan,
+                            cuándo te necesitan y cuándo terminan, y el panel de sesiones lo muestra.
+                            Se suman a tus hooks; no cambian tu configuración de Claude.
+                            Afecta a las sesiones nuevas. Activado por defecto.
+                        </p>
                     </div>
                     <div class="settings-field">
                         <label for="claudeModelsInput">Modelos disponibles</label>

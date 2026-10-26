@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('api', {
     terminalInput:  (id, input)       => ipcRenderer.send('terminal-input',  { id, input }),
     terminalKill:   (id)              => ipcRenderer.send('terminal-kill',   { id }),
     terminalResize: (id, cols, rows)  => ipcRenderer.send('terminal-resize', { id, cols, rows }),
+    // Ruta del settings.json con los hooks de estado (o null si no se pudo crear)
+    agentHooksSettings: () => ipcRenderer.invoke('agent-hooks-settings'),
     terminalNotify: (payload)         => ipcRenderer.send('terminal-notify', payload),
     setWindowTitle: (payload)         => ipcRenderer.send('set-window-title', payload),
 
@@ -44,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
     onTerminalExit:   (cb) => ipcRenderer.on('terminal-exit',   (_event, payload) => cb(payload)),
     onSoftRefresh:    (cb) => ipcRenderer.on('soft-refresh',    () => cb()),
     onFocusPane:      (cb) => ipcRenderer.on('focus-pane',      (_event, payload) => cb(payload)),
+    onAgentStatus:    (cb) => ipcRenderer.on('agent-status',    (_event, payload) => cb(payload)),
 
     // ── Helpers no-IPC ───────────────────────────────────────────────────────
     // webUtils.getPathForFile(file) — devuelve la ruta absoluta de un File

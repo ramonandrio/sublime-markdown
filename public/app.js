@@ -3068,6 +3068,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const claudeSkipPermsToggle = document.getElementById('claudeSkipPermsToggle');
         const claudeSkipPermsStatus = document.getElementById('claudeSkipPermsStatus');
         const CLAUDE_SKIP_PERMS_STORE = 'claude_skip_permissions';
+        const claudeStatusHooksToggle = document.getElementById('claudeStatusHooksToggle');
+        const CLAUDE_STATUS_HOOKS_STORE = 'claude_status_hooks'; // por defecto: activado
         // Modelos de Claude (lista + default), editables aquí. No son secretos.
         const claudeModelsInput        = document.getElementById('claudeModelsInput');
         const claudeDefaultModelSelect = document.getElementById('claudeDefaultModelSelect');
@@ -3140,6 +3142,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
+            // Claude Code — hooks de estado (null = nunca tocado → activado)
+            if (claudeStatusHooksToggle) {
+                idbGet(CLAUDE_STATUS_HOOKS_STORE).then(v => {
+                    claudeStatusHooksToggle.checked = (v !== 'off');
+                });
+            }
+
             // Claude Code — lista de modelos + default
             if (claudeModelsInput) {
                 Promise.all([idbGet(CLAUDE_MODELS_STORE), idbGet(CLAUDE_DEFAULT_MODEL_STORE)])
@@ -3188,6 +3197,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (claudeSkipPermsStatus) {
                     setStatus(claudeSkipPermsStatus, enabled ? '⚠️ Activado' : 'Desactivado', enabled ? 'warn' : 'ok');
                 }
+            });
+        }
+
+        if (claudeStatusHooksToggle) {
+            claudeStatusHooksToggle.addEventListener('change', () => {
+                // Como texto: idbGet convierte un false guardado en null.
+                idbPut(CLAUDE_STATUS_HOOKS_STORE, claudeStatusHooksToggle.checked ? 'on' : 'off');
             });
         }
 

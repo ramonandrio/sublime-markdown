@@ -48,6 +48,20 @@ const COMMAND_DURATION_THRESHOLD_MS = 5000;
 const HISTORY_MAX_LINES = 5000;
 const HISTORY_AUTOSAVE_MS = 10_000;
 
+// Panel de sesiones. Si una sesión lleva este tiempo esperando una respuesta
+// tuya (permiso, pregunta), se vuelve a avisar una vez.
+const AGENT_STUCK_MS = 10 * 60_000;
+// Estados que muestra el panel. "needsMe" = cuenta para el filtro "Me necesita".
+const AGENT_STATES = {
+    needs_you: { label: 'Te necesita',  needsMe: true  },
+    done:      { label: 'Tu turno',     needsMe: true  },
+    error:     { label: 'Error',        needsMe: true  },
+    working:   { label: 'Trabajando',   needsMe: false },
+    waiting:   { label: 'Esperando',    needsMe: false },
+    idle:      { label: 'En espera',    needsMe: false },
+    exited:    { label: 'Cerrado',      needsMe: false },
+};
+
 // Perfiles de arranque para terminales
 // Ollama, Aider y OpenCode resuelven su comando dinámicamente desde
 // la config guardada en IndexedDB (endpoint + modelo), de ahí command: null.
@@ -387,6 +401,7 @@ class TerminalController {
             this._initPanelResizer();
             this._initIpc();
             this._initKeyboard();
+            this._initDashboard();
         };
 
         if (document.readyState === 'loading') {
@@ -426,6 +441,10 @@ class TerminalController {
             // Sólo el input del usuario (onData) o el cierre del pane lo limpian.
             pane._hadOutputEver = true;
             pane._historyDirty = true; // hay output nuevo desde el último snapshot
+            // Para el estado aproximado del panel de sesiones (panes sin hooks).
+            const now = Date.now();
+            if (!pane._lastOutputAt || now - pane._lastOutputAt > IDLE_MS) pane._activeSince = now;
+            pane._lastOutputAt = now;
 
             if (pane._idleTimer) clearTimeout(pane._idleTimer);
             pane._idleTimer = setTimeout(() => this._onPaneIdle(id), IDLE_MS);
@@ -440,6 +459,9 @@ class TerminalController {
 
         // Click en la notificación nativa → enfocamos el pane que la disparó
         this.api.onFocusPane?.(({ paneId }) => this._focusPane(paneId));
+
+        // Eventos de los hooks de estado de Claude (ver main.js: setupAgentStatus)
+        this.api.onAgentStatus?.(({ paneId, payload }) => this._onAgentStatus(paneId, payload));
 
         // Autosave periódico del scrollback de todos los panes vivos, para que
         // un crash o un cierre accidental no se lleve el output por delante.
@@ -474,12 +496,18 @@ class TerminalController {
         }
         // Indicador visual en la pestaña.
         this.tabs.get(pane.tabId)?.tabBtn.classList.add('pane-exited');
+        this._clearStuckTimer(pane);
+        this._refreshDashboard();
     }
 
     // ── Idle detector: la pestaña no ha recibido output en IDLE_MS ────────────
     _onPaneIdle(ptyId) {
         const pane = this.panes.get(ptyId);
         if (!pane || !pane._hadOutputEver || pane._notified) return;
+        // Con hooks, el estado exacto (y sus avisos) llega de Claude: el
+        // detector por silencio solo cubre a los panes sin hooks.
+        if (pane.agent?.hooksSeen) return;
+        this._refreshDashboard();
 
         // El usuario ya está en este pane: no hace falta ningún aviso.
         const paneFocused = document.hasFocus()
@@ -489,6 +517,7 @@ class TerminalController {
         pane._notified = true;
         const tab = this.tabs.get(pane.tabId);
         tab?.tabBtn.classList.add('needs-attention');
+        this._refreshDashboard();
 
         const title = `${this._notificationName(pane)} — listo`;
         const body  = 'El terminal está esperando tu respuesta';
@@ -581,6 +610,7 @@ class TerminalController {
                 if (e.key === 'D') { e.preventDefault(); this.splitPane(tab.activeLeafPtyId, 'h'); }
                 if (e.key === 'E') { e.preventDefault(); this.splitPane(tab.activeLeafPtyId, 'v'); }
                 if (e.key === 'W') { e.preventDefault(); this.closePane(tab.activeLeafPtyId); }
+                if (e.key === 'S') { e.preventDefault(); this.toggleDashboard(); }
             }
         });
     }
@@ -1085,10 +1115,16 @@ class TerminalController {
         // notificación de idle.
         term.onKey(() => {
             const p = this.panes.get(ptyId);
+            if (p) p._userTyped = true;
             if (p?._notified) {
                 p._notified = false;
                 this.tabs.get(p.tabId)?.tabBtn.classList.remove('needs-attention');
             }
+            // Respondiendo a un permiso/pregunta: Claude sigue sin emitir otro
+            // evento hasta la siguiente herramienta o el final del turno.
+            if (p?.agent?.state === 'needs_you') this._setAgentState(p, 'working');
+            if (p?.agent) p.agent.seen = true;
+            this._refreshDashboard();
         });
 
         this.panes.set(ptyId, { ptyId, term, fit, leafNode, tabId, linkedFileId: options.fileId || null,
@@ -1432,6 +1468,12 @@ class TerminalController {
             // ha activado explícitamente en Ajustes. Por defecto: desactivado.
             const skip = await loadSetting('claude_skip_permissions');
             if (skip === true || skip === 'true') cmd += ' --dangerously-skip-permissions';
+            // Hooks de estado para el panel de sesiones. Se SUMAN a los del
+            // usuario (Claude Code combina las listas de hooks de cada nivel).
+            if ((await loadSetting('claude_status_hooks')) !== 'off') {
+                const hooksPath = await this.api?.agentHooksSettings?.();
+                if (hooksPath) cmd += ` --settings ${shellEscapeArg(hooksPath)}`;
+            }
             // Remote Control: si el toggle del submenú está ON, arranca la sesión
             // controlable desde claude.ai/code y el móvil. Se consume una sola vez.
             // Le ponemos un --name descriptivo (compass-<modelo>-<hhmm>) para
@@ -1794,12 +1836,14 @@ class TerminalController {
         // false para que _snapshotPane no lo descarte.
         this._snapshotPane(pane);
         pane._disposed = true;
+        this._clearStuckTimer(pane);
         if (pane._writeTimer) { clearTimeout(pane._writeTimer); pane._writeTimer = null; }
         if (pane._idleTimer)  { clearTimeout(pane._idleTimer);  pane._idleTimer = null; }
         if (pane.leafNode?.el?._themeCleanup) pane.leafNode.el._themeCleanup();
         this.api?.terminalKill(pane.ptyId);
         try { pane.term.dispose(); } catch (_) { /* ya disposed */ }
         this.panes.delete(pane.ptyId);
+        this._refreshDashboard();
     }
 
     // ── Cerrar un pane ────────────────────────────────────────────────────────
@@ -1865,8 +1909,10 @@ class TerminalController {
         tab.tabBtn.remove();
         tab.containerEl.remove();
         this.tabs.delete(tabId);
+        this._refreshDashboard();
 
         if (this.tabs.size === 0) {
+            this.toggleDashboard(false);
             this.panel.style.display  = 'none';
             this.resizer.style.display = 'none';
             this.activeTabId = null;
@@ -1958,6 +2004,11 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (pane?._notified) {
             tab.tabBtn.classList.remove('needs-attention');
+        }
+        // "Tu turno" visto deja de contar como pendiente en el panel.
+        if (pane?.agent?.state === 'done' && !this._dashboardOpen) {
+            pane.agent.seen = true;
+            this._refreshDashboard();
         }
     }
 
@@ -2305,6 +2356,297 @@ class TerminalController {
             document.addEventListener('click', close);
             document.addEventListener('contextmenu', close);
         }, 0);
+    }
+
+    // ── Estado de sesiones (hooks de Claude) ──────────────────────────────────
+    // Cada evento llega de shell-integration/compass-status-hook.sh vía main.js.
+    // pane.agent = { hooksSeen, state, since, detail, tool, toolTarget, cwd,
+    //                lastMessage, seen, _stuckTimer }
+    _setAgentState(pane, state, at = Date.now()) {
+        const a = pane.agent;
+        if (a.state !== state) { a.state = state; a.since = at; }
+        a.seen = false;
+    }
+
+    _onAgentStatus(ptyId, p) {
+        const pane = this.panes.get(ptyId);
+        if (!pane || pane._disposed || !p) return;
+        if (p.event === 'SessionEnd') {
+            // Claude terminó y el pane vuelve a ser una shell: estado aproximado.
+            this._clearStuckTimer(pane);
+            pane.agent = null;
+            this._refreshDashboard();
+            return;
+        }
+        const a = pane.agent || (pane.agent = {});
+        a.hooksSeen = true;
+        if (p.cwd) a.cwd = p.cwd;
+
+        switch (p.event) {
+            case 'SessionStart':
+                this._setAgentState(pane, 'idle', p.at);
+                a.detail = null; a.tool = null;
+                break;
+            case 'UserPromptSubmit':
+                this._setAgentState(pane, 'working', p.at);
+                a.tool = null;
+                a.detail = p.prompt ? `“${p.prompt}”` : null;
+                break;
+            case 'PreToolUse':
+                this._setAgentState(pane, 'working', p.at);
+                a.tool = p.tool || null;
+                a.toolTarget = p.toolTarget || null;
+                break;
+            case 'Notification':
+                // idle_prompt es solo un recordatorio de "tu turno": no cambia nada.
+                if (p.notificationType === 'idle_prompt') break;
+                this._setAgentState(pane, 'needs_you', p.at);
+                // Más útil que el texto genérico (en inglés) de Claude: qué pide hacer.
+                if (p.notificationType === 'permission_prompt' && a.tool) {
+                    const target = a.toolTarget ? ` · ${a.toolTarget.split('/').pop()}` : '';
+                    a.detail = `Pide permiso: ${a.tool}${target}`;
+                } else {
+                    a.detail = p.message || 'Esperando tu respuesta';
+                }
+                this._notifyAgent(pane, 'te necesita', a.detail);
+                break;
+            case 'Stop':
+                a.tool = null;
+                if (p.lastMessage) a.lastMessage = p.lastMessage;
+                if (p.backgroundTasks > 0) {
+                    this._setAgentState(pane, 'waiting', p.at);
+                    a.detail = `${p.backgroundTasks} tarea(s) en segundo plano`;
+                } else {
+                    this._setAgentState(pane, 'done', p.at);
+                    a.detail = null;
+                    // Si ya lo estás mirando, no queda nada pendiente.
+                    if (document.hasFocus() && pane.term?.textarea === document.activeElement) a.seen = true;
+                    this._notifyAgent(pane, 'listo', a.lastMessage || 'Es tu turno');
+                }
+                break;
+            case 'StopFailure':
+                this._setAgentState(pane, 'error', p.at);
+                a.detail = p.error || 'La petición a la API falló';
+                this._notifyAgent(pane, 'error', a.detail);
+                break;
+            default:
+                return;
+        }
+        this._armStuckTimer(pane);
+        this._refreshDashboard();
+    }
+
+    // Aviso (toast o notificación nativa) salvo que ya estés mirando ese pane.
+    _notifyAgent(pane, what, body) {
+        const paneFocused = document.hasFocus() && pane.term?.textarea === document.activeElement;
+        if (paneFocused) return;
+        pane._notified = true;
+        this.tabs.get(pane.tabId)?.tabBtn.classList.add('needs-attention');
+        const title = `${this._notificationName(pane)} — ${what}`;
+        const text = String(body || '').replace(/\s+/g, ' ').slice(0, 180);
+        if (document.hasFocus()) this._showToast(pane.ptyId, title, text);
+        else this.api?.terminalNotify({ paneId: pane.ptyId, title, body: text });
+    }
+
+    // Segundo aviso si lleva AGENT_STUCK_MS esperando una respuesta tuya.
+    _armStuckTimer(pane) {
+        this._clearStuckTimer(pane);
+        const a = pane.agent;
+        if (a?.state !== 'needs_you') return;
+        const since = a.since;
+        a._stuckTimer = setTimeout(() => {
+            if (pane._disposed || pane.agent !== a || a.state !== 'needs_you' || a.since !== since) return;
+            this._notifyAgent(pane, `lleva ${Math.round(AGENT_STUCK_MS / 60_000)} min esperándote`, a.detail);
+        }, AGENT_STUCK_MS);
+    }
+
+    _clearStuckTimer(pane) {
+        if (pane?.agent?._stuckTimer) {
+            clearTimeout(pane.agent._stuckTimer);
+            pane.agent._stuckTimer = null;
+        }
+    }
+
+    // Estado que pinta el panel. Con hooks es exacto; sin ellos se aproxima
+    // por la actividad del terminal (igual que el detector de inactividad).
+    _paneStatus(pane) {
+        if (pane._exited) return { state: 'exited', exact: true };
+        const a = pane.agent;
+        if (a?.hooksSeen && a.state) {
+            const state = (a.state === 'done' && a.seen) ? 'idle' : a.state;
+            let detail = a.detail;
+            if (a.state === 'working' && a.tool) {
+                detail = a.toolTarget ? `${a.tool} · ${a.toolTarget}` : a.tool;
+            } else if (a.state === 'done' || state === 'idle') {
+                detail = a.lastMessage || null;
+            }
+            return { state, since: a.since, detail, cwd: a.cwd, exact: true };
+        }
+        const sh = pane.shellState;
+        if (sh?.commandRunning) {
+            return { state: 'working', since: sh.commandStartTime,
+                     detail: sh.currentCommand ? `$ ${sh.currentCommand}` : null, exact: true };
+        }
+        if (pane._lastOutputAt && Date.now() - pane._lastOutputAt < IDLE_MS) {
+            return { state: 'working', since: pane._activeSince, detail: this._lastLines(pane, 2), exact: false };
+        }
+        // "Tu turno" solo tras un turno tuyo: un shell recién abierto que
+        // termina de pintar el prompt no te está esperando.
+        return { state: (pane._notified && pane._userTyped) ? 'done' : 'idle', since: pane._lastOutputAt,
+                 detail: this._lastLines(pane, 2), exact: false };
+    }
+
+    // Últimas líneas no vacías del buffer visible (para panes sin hooks).
+    _lastLines(pane, n) {
+        try {
+            const buf = pane.term?.buffer?.active;
+            if (!buf) return null;
+            const out = [];
+            for (let i = buf.length - 1; i >= 0 && i >= buf.length - 60 && out.length < n; i--) {
+                const line = buf.getLine(i)?.translateToString(true).trim();
+                if (line && !/^[─━\-=_·\s]+$/.test(line)) out.unshift(line);
+            }
+            return out.length ? out.join('\n') : null;
+        } catch (_) { return null; }
+    }
+
+    // ── Panel de sesiones ─────────────────────────────────────────────────────
+    _initDashboard() {
+        this._dashboardOpen = false;
+        this._dashboardFilter = 'all';
+        this.dashboardBtn = document.getElementById('agentDashboardBtn');
+        this.dashboardBadge = document.getElementById('agentDashboardBadge');
+        if (!this.dashboardBtn || !this.bodyContainer) return;
+
+        const el = document.createElement('div');
+        el.className = 'agent-dashboard';
+        el.hidden = true;
+        el.innerHTML = `
+            <div class="agent-dash-header">
+                <div class="agent-dash-filters" role="tablist">
+                    <button class="agent-dash-filter active" data-filter="all" role="tab">Todas</button>
+                    <button class="agent-dash-filter" data-filter="needs" role="tab">Me necesita</button>
+                </div>
+                <span class="agent-dash-hint">Clic en una sesión para ir a ella · Esc para volver</span>
+            </div>
+            <div class="agent-dash-grid"></div>`;
+        this.bodyContainer.appendChild(el);
+        this.dashboardEl = el;
+        this.dashboardGrid = el.querySelector('.agent-dash-grid');
+
+        el.querySelectorAll('.agent-dash-filter').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this._dashboardFilter = btn.dataset.filter;
+                el.querySelectorAll('.agent-dash-filter').forEach(b => b.classList.toggle('active', b === btn));
+                this._renderDashboard();
+            });
+        });
+        this.dashboardGrid.addEventListener('click', (e) => {
+            const card = e.target.closest('.agent-card');
+            if (!card) return;
+            this.toggleDashboard(false);
+            this._focusPane(card.dataset.ptyId);
+        });
+        this.dashboardBtn.addEventListener('click', () => this.toggleDashboard());
+        // En captura: xterm consume Escape si el foco sigue en un terminal.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this._dashboardOpen) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.toggleDashboard(false);
+            }
+        }, true);
+        this._refreshDashboard();
+    }
+
+    toggleDashboard(force) {
+        if (!this.dashboardEl) return;
+        const open = typeof force === 'boolean' ? force : !this._dashboardOpen;
+        if (open === this._dashboardOpen) return;
+        this._dashboardOpen = open;
+        this.dashboardEl.hidden = !open;
+        this.dashboardBtn?.classList.toggle('active', open);
+        clearInterval(this._dashboardTimer);
+        if (open) {
+            this._renderDashboard();
+            // Sacar el foco del terminal oculto: lo que se teclee no debe ir a él.
+            (this.dashboardGrid.querySelector('.agent-card') || this.dashboardEl.querySelector('.agent-dash-filter'))?.focus();
+            // Solo para refrescar duraciones y panes sin hooks; no consume tokens.
+            this._dashboardTimer = setInterval(() => this._renderDashboard(), 1000);
+        } else {
+            const tab = this.tabs.get(this.activeTabId);
+            const pane = tab && this.panes.get(tab.activeLeafPtyId);
+            try { pane?.term.focus(); } catch (_) {}
+        }
+    }
+
+    // Recuento del botón + repintado si el panel está abierto.
+    _refreshDashboard() {
+        if (!this.dashboardBtn) return;
+        let needs = 0;
+        for (const pane of this.panes.values()) {
+            if (AGENT_STATES[this._paneStatus(pane).state]?.needsMe) needs++;
+        }
+        this.dashboardBadge.textContent = needs ? String(needs) : '';
+        this.dashboardBadge.hidden = !needs;
+        this.dashboardBtn.title = needs
+            ? `Panel de sesiones — ${needs} te necesita(n) (Ctrl+Shift+S)`
+            : 'Panel de sesiones (Ctrl+Shift+S)';
+        if (this._dashboardOpen) this._renderDashboard();
+    }
+
+    _renderDashboard() {
+        if (!this.dashboardGrid) return;
+        const ago = (t) => {
+            if (!t) return '';
+            const m = Math.floor((Date.now() - t) / 60_000);
+            if (m < 1) return 'ahora';
+            if (m < 60) return `${m} min`;
+            return `${Math.floor(m / 60)} h ${m % 60} min`;
+        };
+        const cards = [];
+        let total = 0, needsCount = 0;
+        for (const [tabId, tab] of this.tabs) {
+            const tabName = tab.tabBtn.querySelector('.terminal-tab-name')?.textContent?.trim() || 'Terminal';
+            this._walkLeaves(tab.rootNode, (leaf) => {
+                const pane = this.panes.get(leaf.ptyId);
+                if (!pane) return;
+                const st = this._paneStatus(pane);
+                const meta = AGENT_STATES[st.state] || AGENT_STATES.idle;
+                total++;
+                if (meta.needsMe) needsCount++;
+                if (this._dashboardFilter === 'needs' && !meta.needsMe) return;
+                const paneTitle = leaf.el?.querySelector('.pane-title')?.textContent?.trim() || 'Terminal';
+                const cwd = st.cwd ? st.cwd.replace(/^\/Users\/[^/]+/, '~') : '';
+                const active = tabId === this.activeTabId && tab.activeLeafPtyId === leaf.ptyId;
+                cards.push(`
+                    <button class="agent-card state-${st.state}${active ? ' is-active' : ''}" data-pty-id="${escapeHtml(leaf.ptyId)}">
+                        <div class="agent-card-top">
+                            <span class="agent-dot"></span>
+                            <span class="agent-state">${meta.label}</span>
+                            ${st.exact ? '' : '<span class="agent-approx" title="Estado aproximado por la actividad del terminal (sin hooks)">≈</span>'}
+                            <span class="agent-ago">${ago(st.since)}</span>
+                        </div>
+                        <div class="agent-card-title">${escapeHtml(paneTitle)}</div>
+                        <div class="agent-card-sub">${escapeHtml(tabName)}${cwd ? ` · <span title="${escapeHtml(st.cwd)}">${escapeHtml(cwd)}</span>` : ''}</div>
+                        ${st.detail ? `<div class="agent-card-detail">${escapeHtml(st.detail)}</div>` : ''}
+                    </button>`);
+            });
+        }
+        const filters = this.dashboardEl.querySelectorAll('.agent-dash-filter');
+        filters[0].textContent = `Todas (${total})`;
+        filters[1].textContent = `Me necesita (${needsCount})`;
+        const html = cards.length ? cards.join('') : `
+            <div class="agent-dash-empty">${total
+                ? 'Ninguna sesión te necesita ahora mismo.'
+                : 'No hay sesiones abiertas.'}</div>`;
+        // Se repinta cada segundo: solo tocar el DOM si algo cambió, y
+        // conservar la tarjeta enfocada (navegación con teclado).
+        if (html === this._dashboardHtml) return;
+        this._dashboardHtml = html;
+        const focusedId = document.activeElement?.closest?.('.agent-card')?.dataset.ptyId;
+        this.dashboardGrid.innerHTML = html;
+        if (focusedId) this.dashboardGrid.querySelector(`.agent-card[data-pty-id="${CSS.escape(focusedId)}"]`)?.focus();
     }
 
     closeAll() {
