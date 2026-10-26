@@ -2608,16 +2608,28 @@ class TerminalController {
         let total = 0, needsCount = 0;
         for (const [tabId, tab] of this.tabs) {
             const tabName = tab.tabBtn.querySelector('.terminal-tab-name')?.textContent?.trim() || 'Terminal';
+            let unnamed = 0; // numeración de los panes sin nombre propio de esta pestaña
             this._walkLeaves(tab.rootNode, (leaf) => {
                 const pane = this.panes.get(leaf.ptyId);
                 if (!pane) return;
+                // Título: el nombre que le diste al pane (doble clic) o, si no
+                // tiene, el de la pestaña numerado: "Pestaña (1)", "(2)"…
+                // Se numera antes del filtro para que no cambie al filtrar.
+                const autoLabel = leaf.el?.querySelector('.pane-title')?.textContent?.trim() || 'Terminal';
+                const title = pane._customTitle || `${tabName} (${++unnamed})`;
+                // Debajo: el perfil ("Claude (haiku)") si el título no lo dice ya.
+                const subLabel = pane._customTitle
+                    ? tabName
+                    : (autoLabel !== 'Terminal' && autoLabel !== tabName ? autoLabel : '');
                 const st = this._paneStatus(pane);
                 const meta = AGENT_STATES[st.state] || AGENT_STATES.idle;
                 total++;
                 if (meta.needsMe) needsCount++;
                 if (this._dashboardFilter === 'needs' && !meta.needsMe) return;
-                const paneTitle = leaf.el?.querySelector('.pane-title')?.textContent?.trim() || 'Terminal';
                 const cwd = st.cwd ? st.cwd.replace(/^\/Users\/[^/]+/, '~') : '';
+                const sub = [subLabel && escapeHtml(subLabel),
+                             cwd && `<span title="${escapeHtml(st.cwd)}">${escapeHtml(cwd)}</span>`]
+                    .filter(Boolean).join(' · ');
                 const active = tabId === this.activeTabId && tab.activeLeafPtyId === leaf.ptyId;
                 cards.push(`
                     <button class="agent-card state-${st.state}${active ? ' is-active' : ''}" data-pty-id="${escapeHtml(leaf.ptyId)}">
@@ -2627,8 +2639,8 @@ class TerminalController {
                             ${st.exact ? '' : '<span class="agent-approx" title="Estado aproximado por la actividad del terminal (sin hooks)">≈</span>'}
                             <span class="agent-ago">${ago(st.since)}</span>
                         </div>
-                        <div class="agent-card-title">${escapeHtml(paneTitle)}</div>
-                        <div class="agent-card-sub">${escapeHtml(tabName)}${cwd ? ` · <span title="${escapeHtml(st.cwd)}">${escapeHtml(cwd)}</span>` : ''}</div>
+                        <div class="agent-card-title">${escapeHtml(title)}</div>
+                        ${sub ? `<div class="agent-card-sub">${sub}</div>` : ''}
                         ${st.detail ? `<div class="agent-card-detail">${escapeHtml(st.detail)}</div>` : ''}
                     </button>`);
             });
