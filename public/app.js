@@ -1,3 +1,108 @@
+// Escapa texto para interpolarlo de forma segura dentro de plantillas HTML
+// (innerHTML). Úsalo SIEMPRE que el valor venga de un fichero, de su nombre,
+// o de una fuente externa — evita XSS por contenido no confiable.
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// ── Render de JSON ───────────────────────────────────────────────────────────
+// renderJson devuelve un string HTML para inyectar en #markdownContent. Es
+// TOLERANTE a JSON inválido (el editor re-renderiza en cada tecla): si no
+// parsea, muestra un aviso + el texto crudo escapado, sin romper la vista.
+
+function jsonPrimitiveHtml(value) {
+    if (value === null) return '<span class="json-null">null</span>';
+    const t = typeof value;
+    if (t === 'string') return `<span class="json-string">"${escapeHtml(value)}"</span>`;
+    if (t === 'number') return `<span class="json-number">${escapeHtml(String(value))}</span>`;
+    if (t === 'boolean') return `<span class="json-bool">${value}</span>`;
+    return `<span>${escapeHtml(String(value))}</span>`;
+}
+
+// Construye recursivamente el árbol plegable. keyLabel es el prefijo de clave
+// (ya escapado y envuelto en su span) o '' para la raíz.
+function buildJsonTree(value, keyLabel) {
+    const isObj = value !== null && typeof value === 'object';
+    if (!isObj) {
+        return `<div class="json-node json-leaf">${keyLabel}${jsonPrimitiveHtml(value)}</div>`;
+    }
+    const isArr = Array.isArray(value);
+    const open = isArr ? '[' : '{';
+    const close = isArr ? ']' : '}';
+    const entries = isArr ? value.map((v, i) => [i, v]) : Object.entries(value);
+    if (entries.length === 0) {
+        return `<div class="json-node json-leaf">${keyLabel}<span class="json-punct">${open}${close}</span></div>`;
+    }
+    const children = entries.map(([k, v]) => {
+        const kl = isArr
+            ? `<span class="json-index">${k}</span><span class="json-punct">: </span>`
+            : `<span class="json-key">"${escapeHtml(k)}"</span><span class="json-punct">: </span>`;
+        return buildJsonTree(v, kl);
+    }).join('');
+    return `<div class="json-node json-branch">` +
+        `<div class="json-row" role="button" tabindex="0">` +
+        `<span class="json-toggle">▾</span>${keyLabel}` +
+        `<span class="json-punct">${open}</span>` +
+        `<span class="json-count">${entries.length}</span>` +
+        `<span class="json-punct json-close-inline">${close}</span>` +
+        `</div>` +
+        `<div class="json-children">${children}</div>` +
+        `<div class="json-node json-brace-close"><span class="json-punct">${close}</span></div>` +
+        `</div>`;
+}
+
+function renderJson(rawText, view) {
+    let parsed;
+    try {
+        parsed = JSON.parse(rawText);
+    } catch (e) {
+        return `<div class="json-view">` +
+            `<div class="json-error">JSON inválido: ${escapeHtml(e.message)}</div>` +
+            `<pre class="json-raw">${escapeHtml(rawText)}</pre>` +
+            `</div>`;
+    }
+    if (view === 'tree') {
+        return `<div class="json-view json-tree">${buildJsonTree(parsed, '')}</div>`;
+    }
+    // Vista formateada + resaltado con highlight.js (ya escapa el contenido).
+    const pretty = JSON.stringify(parsed, null, 2);
+    let highlighted;
+    try {
+        highlighted = hljs.highlight(pretty, { language: 'json' }).value;
+    } catch {
+        highlighted = escapeHtml(pretty);
+    }
+    return `<div class="json-view json-formatted"><pre class="hljs"><code class="language-json">${highlighted}</code></pre></div>`;
+}
+
+// Delegación de plegado del árbol: pliega/despliega al pulsar una fila con
+// hijos. Se engancha una sola vez por contenedor (no por render).
+function attachJsonTreeToggle(container) {
+    if (!container || container._jsonToggleBound) return;
+    container._jsonToggleBound = true;
+    const toggleRow = (row) => {
+        const branch = row.closest('.json-branch');
+        if (!branch) return;
+        const collapsed = branch.classList.toggle('collapsed');
+        const tg = row.querySelector('.json-toggle');
+        if (tg) tg.textContent = collapsed ? '▸' : '▾';
+    };
+    container.addEventListener('click', (e) => {
+        const row = e.target.closest('.json-row');
+        if (row && container.contains(row)) toggleRow(row);
+    });
+    container.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const row = e.target.closest('.json-row');
+        if (row && container.contains(row)) { e.preventDefault(); toggleRow(row); }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     if (window.api) {
         document.body.classList.add('electron-mode');
@@ -8,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const appContainer = document.getElementById('appContainer');
     const fileTreeContainer = document.getElementById('fileTreeContainer');
     const markdownContent = document.getElementById('markdownContent');
+    attachJsonTreeToggle(markdownContent);
     const tabsContainer = document.getElementById('tabsContainer');
     const editorToolbar = document.getElementById('editorToolbar');
     const toggleSplitBtn = document.getElementById('toggleSplitBtn');
@@ -84,6 +190,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return splitGroups.find(g => g.left === tabId || g.right === tabId) || null;
     }
 
+    // Repinta el panel dividido si `tab` es el compañero visible del tab activo.
+    function refreshSplitIfPartner(tab) {
+        const group = findSplitGroupFor(activeTabId);
+        if (!group || !splitMarkdownContent) return;
+        const partnerId = group.left === activeTabId ? group.right : group.left;
+        if (tab.id === partnerId) splitMarkdownContent.innerHTML = tab.content;
+    }
+
     // Bloquear webviews/iframes durante drag resize
     function _blockWebviews() {
         document.querySelectorAll('webview, iframe').forEach(el => { el.style.pointerEvents = 'none'; });
@@ -103,6 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Search State
     let localSearchIndex = new Map(); // path -> { path, name, rawContent }
     let isSearchModalOpen = false;
+    let _searchTrapRelease = null;  // release del focus-trap del search modal
     let searchDebounceTimer = null;
     let searchSelectedIndex = -1;
     let currentSearchResults = [];
@@ -152,6 +267,73 @@ document.addEventListener('DOMContentLoaded', () => {
             btnOk.addEventListener('click', onOk);
             btnCancel.addEventListener('click', onCancel);
             input.addEventListener('keydown', onKey);
+        });
+    }
+
+    // Focus trap reutilizable para modales. Guarda el foco previo, cicla Tab
+    // dentro del modal y, al liberar, devuelve el foco al elemento que lo tenía
+    // antes de abrir (requisito de accesibilidad para diálogos).
+    function createFocusTrap(modalEl) {
+        const prevFocus = document.activeElement;
+        const SEL = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        function onKey(e) {
+            if (e.key !== 'Tab') return;
+            const items = [...modalEl.querySelectorAll(SEL)].filter(el => el.offsetParent !== null);
+            if (!items.length) return;
+            const first = items[0], last = items[items.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+        modalEl.addEventListener('keydown', onKey);
+        return function release() {
+            modalEl.removeEventListener('keydown', onKey);
+            if (prevFocus && typeof prevFocus.focus === 'function') {
+                try { prevFocus.focus(); } catch (_) {}
+            }
+        };
+    }
+
+    // Confirmación modal propia (reemplaza window.confirm). Reutiliza el modal
+    // del prompt ocultando el input. Devuelve Promise<boolean>.
+    function showConfirm(message, { okLabel = 'Aceptar', cancelLabel = 'Cancelar', danger = false } = {}) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('customPromptModal');
+            const title = document.getElementById('customPromptTitle');
+            const input = document.getElementById('customPromptInput');
+            const btnOk = document.getElementById('customPromptOk');
+            const btnCancel = document.getElementById('customPromptCancel');
+            if (!modal) { resolve(window.confirm(message)); return; }
+
+            title.textContent = message;
+            input.style.display = 'none'; // un confirm no necesita campo de texto
+            btnOk.textContent = okLabel;
+            btnCancel.textContent = cancelLabel;
+            if (danger) btnOk.classList.add('danger');
+            modal.style.display = 'flex';
+            const trapRelease = createFocusTrap(modal);
+            setTimeout(() => btnOk.focus(), 50);
+
+            const cleanup = () => {
+                btnOk.removeEventListener('click', onOk);
+                btnCancel.removeEventListener('click', onCancel);
+                modal.removeEventListener('keydown', onKey);
+                input.style.display = '';        // restaurar para showCustomPrompt
+                btnOk.textContent = 'Aceptar';
+                btnCancel.textContent = 'Cancelar';
+                btnOk.classList.remove('danger');
+                modal.style.display = 'none';
+                trapRelease();
+            };
+            const onOk = () => { cleanup(); resolve(true); };
+            const onCancel = () => { cleanup(); resolve(false); };
+            const onKey = (e) => {
+                // Enter respeta el foco: sobre "Cancelar" cancela, nunca confirma
+                if (e.key === 'Enter') { e.preventDefault(); document.activeElement === btnCancel ? onCancel() : onOk(); }
+                if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+            };
+            btnOk.addEventListener('click', onOk);
+            btnCancel.addEventListener('click', onCancel);
+            modal.addEventListener('keydown', onKey);
         });
     }
 
@@ -327,7 +509,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentNodeServer,
             activeTabId,
             expandedFolders: [...expandedFolders],
-            codaPages: window._getCodaPages ? window._getCodaPages() : [],
             openTabs: openTabs.map(t => ({
                 id: t.id,
                 name: t.name,
@@ -368,11 +549,9 @@ document.addEventListener('DOMContentLoaded', () => {
             openTabs = state.openTabs || [];
             activeTabId = state.activeTabId;
             expandedFolders = new Set(state.expandedFolders || []);
-
-            // Restore Coda pages (will render the sidebar list)
-            if (state.codaPages && window._setCodaPages) {
-                window._setCodaPages(state.codaPages);
-            }
+            // Descartar pestañas de la antigua integración Coda/Notion (eliminada)
+            openTabs = openTabs.filter(t => !/^(coda|notion)-api:/.test(t.id || ''));
+            if (activeTabId && !openTabs.some(t => t.id === activeTabId)) activeTabId = openTabs[0]?.id || null;
 
             // En CompassAI nativo (Electron), los handles locales del navegador no sirven.
             // Si venimos de versiones antiguas, forzamos la limpieza de ese estado.
@@ -387,18 +566,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (t.isHtml === undefined && t.name && t.name.endsWith('.html')) {
                     t.isHtml = true;
                 }
+                // Retroactive fix for tabs saved before isJson was added to state
+                if (t.isJson === undefined && t.name && t.name.endsWith('.json')) {
+                    t.isJson = true;
+                }
+                if (t.isJson && !t.jsonView) t.jsonView = 'tree';
 
                 if (t.isHtml && t.rawContent) {
-                    const blob = new Blob([t.rawContent], { type: 'text/html' });
-                    const url = URL.createObjectURL(blob);
-                    t.content = `
-                        <div class="html-preview-wrapper">
-                            <div id="htmlPreviewFrame" class="html-preview-frame desktop">
-                                <iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe>
-                            </div>
-                        </div>
-                    `;
-                    t.blobUrl = url;
+                    t.blobUrl = null; // la URL guardada ya no es válida tras recargar
+                    renderTabContent(t);
                 }
             });
 
@@ -559,7 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     saveWorkspaceState();
                     return;
                 } else {
-                    alert('Error al establecer la carpeta en CompassAI. Comprueba los permisos.');
+                    showToast('Error al establecer la carpeta en CompassAI. Comprueba los permisos.', 'warning', 5000);
                     return;
                 }
             }
@@ -584,7 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
             saveWorkspaceState();
         } catch (err) {
             if (err.name !== 'AbortError') {
-                alert('Error al abrir carpeta: ' + err.message);
+                showToast('Error al abrir carpeta: ' + escapeHtml(err.message), 'warning', 5000);
             }
         }
     });
@@ -608,6 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menuTerminalDropdown) {
             const tc = window.terminalCtrl;
             const profiles = tc?.PANE_PROFILES || [];
+            let claudeSection = null;
             for (const profile of profiles) {
                 if (profile.dynamic) continue;
                 const item = document.createElement('button');
@@ -619,6 +796,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     tc?.openTerminal({ profile: profile.id });
                 });
                 menuTerminalDropdown.appendChild(item);
+                // Bajo "Claude": sus modelos indentados (se rellenan al abrir).
+                if (profile.id === 'claude') {
+                    claudeSection = document.createElement('div');
+                    claudeSection.className = 'pane-profile-claude-section';
+                    menuTerminalDropdown.appendChild(claudeSection);
+                }
             }
             const dynamicSection = document.createElement('div');
             dynamicSection.className = 'pane-profile-dynamic-section';
@@ -631,6 +814,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (d !== menuTerminalDropdown) d.classList.remove('open');
                 });
                 const willOpen = !menuTerminalDropdown.classList.contains('open');
+                if (willOpen && claudeSection && tc?.renderClaudeModelItems) {
+                    await tc.renderClaudeModelItems(claudeSection, (opts) => {
+                        menuTerminalDropdown.classList.remove('open');
+                        tc.openTerminal(opts);
+                    });
+                }
                 if (willOpen && tc?.renderDynamicProfileItems) {
                     await tc.renderDynamicProfileItems(dynamicSection, (opts) => {
                         menuTerminalDropdown.classList.remove('open');
@@ -684,7 +873,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         saveWorkspaceState();
                         return;
                     } else {
-                        alert('Error al establecer la carpeta en CompassAI. Comprueba los permisos.');
+                        showToast('Error al establecer la carpeta en CompassAI. Comprueba los permisos.', 'warning', 5000);
                         return;
                     }
                 }
@@ -778,6 +967,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Alterna la vista JSON entre formateada y árbol plegable.
+    document.getElementById('jsonViewToggle').addEventListener('click', () => {
+        const activeTab = openTabs.find(t => t.id === activeTabId);
+        if (!activeTab || !activeTab.isJson) return;
+        activeTab.jsonView = (activeTab.jsonView === 'tree') ? 'formatted' : 'tree';
+        document.getElementById('jsonViewToggleLabel').textContent =
+            (activeTab.jsonView === 'tree') ? 'Formateado' : 'Árbol';
+        renderTabContent(activeTab);
+        markdownContent.innerHTML = activeTab.content;
+    });
+
     document.getElementById('downloadHtmlBtn').addEventListener('click', () => {
         const activeTab = openTabs.find(t => t.id === activeTabId);
         if (activeTab && activeTab.isHtml && activeTab.rawContent) {
@@ -837,18 +1037,8 @@ document.addEventListener('DOMContentLoaded', () => {
         activeTab.rawContent = markdownEditor.value;
         activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
 
-        const rawHtml = marked.parse(activeTab.rawContent);
-        activeTab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+        renderTabContent(activeTab);
         markdownContent.innerHTML = activeTab.content;
-
-        // Actualizar split view si este tab es el partner visible
-        const activeGroup = findSplitGroupFor(activeTabId);
-        if (activeGroup && splitMarkdownContent) {
-            const partnerId = activeGroup.left === activeTabId ? activeGroup.right : activeGroup.left;
-            if (activeTab.id === partnerId) {
-                splitMarkdownContent.innerHTML = activeTab.content;
-            }
-        }
 
         if (isTocOpen) generateTOC();
         renderTabs();
@@ -934,8 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeTab) {
             activeTab.rawContent = snapshot.text;
             activeTab.dirty = (activeTab.rawContent !== activeTab.savedContent);
-            const rawHtml = marked.parse(activeTab.rawContent);
-            activeTab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+            renderTabContent(activeTab);
             markdownContent.innerHTML = activeTab.content;
             if (isTocOpen) generateTOC();
             renderTabs();
@@ -974,7 +1163,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (entry.kind === 'directory') {
                 item.children.push(await getTreeFromHandle(entry, pathPrefix + dirHandle.name + '/'));
-            } else if (/\.(md|html|pdf|docx?|pptx?)$/i.test(entry.name)) {
+            } else if (/\.(md|html|json|pdf|docx?|pptx?)$/i.test(entry.name)) {
                 item.children.push({
                     name: entry.name,
                     path: pathPrefix + dirHandle.name + '/' + entry.name,
@@ -1118,6 +1307,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const fileSvgWithLabel = (label) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${fileDocBase}<text x="12" y="19" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none" font-family="sans-serif">${label}</text></svg>`;
             if (lowerName.endsWith('.html')) {
                 fileIcon.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>`;
+            } else if (lowerName.endsWith('.json')) {
+                fileIcon.innerHTML = fileSvgWithLabel('{}');
             } else if (lowerName.endsWith('.pdf')) {
                 fileIcon.innerHTML = fileSvgWithLabel('PDF');
             } else if (lowerName.endsWith('.doc') || lowerName.endsWith('.docx')) {
@@ -1152,7 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             itemRow.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (!/\.(md|html)$/i.test(item.name)) return;
+                if (!/\.(md|html|json)$/i.test(item.name)) return;
                 openFileTab(item);
                 if (isMobile()) closeMobileSidebar();
             });
@@ -1196,12 +1387,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = openTabs.find(t => t.id === tabId);
         if (existing) { setActiveTab(tabId); return; }
 
-        showToast(`Levantando servidor para ${folderName}...`, 'info', 2000);
+        showToast(`Levantando servidor para ${escapeHtml(folderName)}...`, 'info', 2000);
 
         const result = await window.api.protoServerStart(folderPath);
 
         if (!result.ok) {
-            showToast(`Error: ${result.error}`, 'warning', 4000);
+            showToast(`Error: ${escapeHtml(result.error)}`, 'warning', 4000);
             return;
         }
 
@@ -1242,6 +1433,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 isLocal: !!item.handle,
                 isNode: currentNodeServer,
                 isHtml: item.name.endsWith('.html'),
+                isJson: item.name.endsWith('.json'),
+                jsonView: 'tree',
                 content: null,
                 rawContent: null,
                 savedContent: null,
@@ -1286,7 +1479,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             tabEl.innerHTML = `
                 ${iconHtml}
-                <span class="filename" title="${tabData.path || tabData.name}">${tabData.name}</span>${dirtyDot}
+                <span class="filename" title="${escapeHtml(tabData.path || tabData.name)}">${escapeHtml(tabData.name)}</span>${dirtyDot}
                 <button class="close-tab">×</button>
             `;
 
@@ -1421,6 +1614,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('openHtmlBtn').style.display = 'flex';
                 document.getElementById('downloadHtmlBtn').style.display = 'flex';
                 document.getElementById('htmlResponsiveToolbar').style.display = 'flex';
+                document.getElementById('jsonViewToggle').style.display = 'none';
 
                 previewPanel.style.padding = '0';
                 markdownContent.style.maxWidth = 'none';
@@ -1434,12 +1628,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     isEditorOpen = false;
                     updateEditorVisibility();
                 }
+            } else if (activeTab.isJson) {
+                // Editable como Markdown, con toggle de vista Formateado/Árbol.
+                document.getElementById('toggleSplitBtn').style.display = 'flex';
+                saveFileBtn.style.display = 'flex';
+                document.getElementById('openHtmlBtn').style.display = 'none';
+                document.getElementById('downloadHtmlBtn').style.display = 'none';
+                document.getElementById('htmlResponsiveToolbar').style.display = 'none';
+                const jvt = document.getElementById('jsonViewToggle');
+                jvt.style.display = 'flex';
+                document.getElementById('jsonViewToggleLabel').textContent =
+                    (activeTab.jsonView === 'tree') ? 'Formateado' : 'Árbol';
+
+                previewPanel.style.padding = '40px';
+                markdownContent.style.maxWidth = '';
+                markdownContent.style.height = '';
+                markdownContent.style.flex = '';
+                markdownContent.style.display = '';
+                markdownContent.style.flexDirection = '';
             } else {
                 document.getElementById('toggleSplitBtn').style.display = 'flex';
                 saveFileBtn.style.display = 'flex';
                 document.getElementById('openHtmlBtn').style.display = 'none';
                 document.getElementById('downloadHtmlBtn').style.display = 'none';
                 document.getElementById('htmlResponsiveToolbar').style.display = 'none';
+                document.getElementById('jsonViewToggle').style.display = 'none';
 
                 previewPanel.style.padding = '40px';
                 markdownContent.style.maxWidth = '';
@@ -1493,15 +1706,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function closeTab(fileId) {
+    async function closeTab(fileId, { skipConfirm = false } = {}) {
         const tab = openTabs.find(t => t.id === fileId);
-        if (tab && tab.dirty) {
-            if (!confirm(`El archivo "${tab.name}" tiene cambios sin guardar. ¿Cerrar de todos modos?`)) return;
+        if (tab && tab.dirty && !skipConfirm) {
+            const ok = await showConfirm(
+                `El archivo "${tab.name}" tiene cambios sin guardar. ¿Cerrar de todos modos?`,
+                { okLabel: 'Cerrar sin guardar', danger: true }
+            );
+            if (!ok) return;
         }
 
         // Parar servidor de prototipo si lo tiene
         if (tab && tab.protoFolderPath && window.api) {
             window.api.protoServerStop(tab.protoFolderPath);
+        }
+
+        // Liberar el blob URL del preview HTML para no fugar memoria al
+        // abrir/cerrar tabs HTML repetidamente.
+        if (tab && tab.blobUrl) {
+            URL.revokeObjectURL(tab.blobUrl);
+            tab.blobUrl = null;
         }
 
         // Si el tab está en un split group, deshacer ese split
@@ -1535,6 +1759,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const splitPanel = document.getElementById('splitPanel');
     const splitDivider = document.getElementById('splitDivider');
     const splitMarkdownContent = document.getElementById('splitMarkdownContent');
+    attachJsonTreeToggle(splitMarkdownContent);
     const splitPanelClose = document.getElementById('splitPanelClose');
 
     function createSplitGroup(leftTabId, rightTabId) {
@@ -1618,33 +1843,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 markdownText = await res.text();
             }
 
-            if (tabData.isHtml) {
-                const blob = new Blob([markdownText], { type: 'text/html' });
-                const url = URL.createObjectURL(blob);
-                tabData.content = `<div class="html-preview-wrapper"><div class="html-preview-frame desktop"><iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe></div></div>`;
-            } else {
-                tabData.rawContent = markdownText;
-                tabData.savedContent = markdownText;
-                tabData.content = typeof marked !== 'undefined'
-                    ? DOMPurify.sanitize(marked.parse(markdownText))
-                    : markdownText;
-            }
-
-            // Actualizar si sigue siendo el partner visible
-            const loadGroup = findSplitGroupFor(activeTabId);
-            if (loadGroup) {
-                const partnerId = loadGroup.left === activeTabId ? loadGroup.right : loadGroup.left;
-                if (tabData.id === partnerId) {
-                    splitMarkdownContent.innerHTML = tabData.content;
-                }
-            }
+            tabData.rawContent = markdownText;
+            tabData.savedContent = markdownText;
+            if (tabData.isJson && !tabData.jsonView) tabData.jsonView = 'tree';
+            renderTabContent(tabData);
+            refreshSplitIfPartner(tabData);
         } catch (err) {
-            const errGroup = findSplitGroupFor(activeTabId);
-            if (errGroup) {
-                const partnerId = errGroup.left === activeTabId ? errGroup.right : errGroup.left;
-                if (tabData.id === partnerId) {
-                    splitMarkdownContent.innerHTML = `<div class="error-state">Error: ${err.message}</div>`;
-                }
+            const group = findSplitGroupFor(activeTabId);
+            const partnerId = group && (group.left === activeTabId ? group.right : group.left);
+            if (tabData.id === partnerId) {
+                splitMarkdownContent.innerHTML = `<div class="error-state">Error: ${escapeHtml(err.message)}</div>`;
             }
         }
     }
@@ -1746,7 +1954,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeTab) {
                 const splitItem = document.createElement('div');
                 splitItem.className = 'tab-context-menu-item';
-                splitItem.innerHTML = `${svgSplit} Vista dividida con "${activeTab.name}"`;
+                splitItem.innerHTML = `${svgSplit} Vista dividida con "${escapeHtml(activeTab.name)}"`;
                 splitItem.addEventListener('click', () => {
                     removeContextMenu();
                     createSplitGroup(activeTabId, tabData.id);
@@ -1825,10 +2033,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 </svg>
                 Cerrar otras pestañas
             `;
-            closeOthersItem.addEventListener('click', () => {
+            closeOthersItem.addEventListener('click', async () => {
                 removeContextMenu();
-                const others = openTabs.filter(t => t.id !== tabData.id).map(t => t.id);
-                others.forEach(id => closeTab(id));
+                const others = openTabs.filter(t => t.id !== tabData.id);
+                // Confirmar UNA sola vez si alguna de las otras tiene cambios,
+                // en lugar de encadenar un diálogo por cada pestaña.
+                const dirtyCount = others.filter(t => t.dirty).length;
+                if (dirtyCount > 0) {
+                    const ok = await showConfirm(
+                        `${dirtyCount} pestaña(s) tienen cambios sin guardar. ¿Cerrarlas de todos modos?`,
+                        { okLabel: 'Cerrar sin guardar', danger: true }
+                    );
+                    if (!ok) return;
+                }
+                others.forEach(t => closeTab(t.id, { skipConfirm: true }));
             });
             menu.appendChild(closeOthersItem);
         }
@@ -1849,6 +2067,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================
     // CARGA DE ARCHIVOS
     // ===================================
+
+    // Renderiza rawContent → content según el tipo de pestaña. Punto único para
+    // HTML (iframe sandbox), JSON (formateado/árbol) y Markdown, de modo que la
+    // carga inicial y la edición en vivo comparten exactamente la misma lógica.
+    function renderTabContent(tabData) {
+        if (tabData.isHtml) {
+            if (tabData.blobUrl) URL.revokeObjectURL(tabData.blobUrl); // no fugar el anterior
+            const blob = new Blob([tabData.rawContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            tabData.content = `
+                    <div class="html-preview-wrapper">
+                        <div id="htmlPreviewFrame" class="html-preview-frame desktop">
+                            <iframe src="${url}" sandbox="allow-scripts" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe>
+                        </div>
+                    </div>
+                `;
+            tabData.blobUrl = url; // Guarda la url para descarga/nueva pestaña
+        } else if (tabData.isJson) {
+            tabData.content = renderJson(tabData.rawContent, tabData.jsonView || 'tree');
+        } else {
+            const rawHtml = marked.parse(tabData.rawContent);
+            tabData.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+        }
+    }
 
     async function loadFileContent(tabData) {
         try {
@@ -1872,21 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tabData.rawContent = markdownText;
             tabData.savedContent = markdownText;
 
-            if (tabData.isHtml) {
-                const blob = new Blob([markdownText], { type: 'text/html' });
-                const url = URL.createObjectURL(blob);
-                tabData.content = `
-                    <div class="html-preview-wrapper">
-                        <div id="htmlPreviewFrame" class="html-preview-frame desktop">
-                            <iframe src="${url}" sandbox="allow-scripts allow-same-origin" style="width:100%; height:100%; border:none; background:white; display:block;"></iframe>
-                        </div>
-                    </div>
-                `;
-                tabData.blobUrl = url; // Guarda la url para descarga/nueva pestaña
-            } else {
-                const rawHtml = marked.parse(markdownText);
-                tabData.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
-            }
+            renderTabContent(tabData);
 
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
@@ -1895,29 +2123,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 initHistory(tabData.id, tabData.rawContent);
                 if (isTocOpen) generateTOC();
             }
-            // Actualizar split view si este tab es el partner visible
-            const openGroup = findSplitGroupFor(activeTabId);
-            if (openGroup && splitMarkdownContent) {
-                const partnerId = openGroup.left === activeTabId ? openGroup.right : openGroup.left;
-                if (tabData.id === partnerId) {
-                    splitMarkdownContent.innerHTML = tabData.content;
-                }
-            }
+            refreshSplitIfPartner(tabData);
 
         } catch (error) {
             console.error('Error opening file:', error);
-            tabData.content = `<div class="error-state"><h3>Error al cargar</h3><p>${error.message}</p></div>`;
+            tabData.content = `<div class="error-state"><h3>Error al cargar</h3><p>${escapeHtml(error.message)}</p></div>`;
             tabData.rawContent = '';
             if (tabData.id === activeTabId) {
                 markdownContent.innerHTML = tabData.content;
             }
-            const errGroup2 = findSplitGroupFor(activeTabId);
-            if (errGroup2 && splitMarkdownContent) {
-                const partnerId = errGroup2.left === activeTabId ? errGroup2.right : errGroup2.left;
-                if (tabData.id === partnerId) {
-                    splitMarkdownContent.innerHTML = tabData.content;
-                }
-            }
+            refreshSplitIfPartner(tabData);
         }
     }
 
@@ -2020,15 +2235,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // El archivo cambió externamente
                 if (tab.dirty) {
-                    showToast(`⚠️ <strong>${tab.name}</strong> modificado externamente (tienes cambios sin guardar)`, 'warning', 5000);
+                    showToast(`⚠️ <strong>${escapeHtml(tab.name)}</strong> modificado externamente (tienes cambios sin guardar)`, 'warning', 5000);
                     continue;
                 }
 
                 // Actualizar silenciosamente
                 tab.rawContent = newContent;
                 tab.savedContent = newContent;
-                const rawHtml = marked.parse(newContent);
-                tab.content = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+                renderTabContent(tab);
+                refreshSplitIfPartner(tab);
 
                 if (tab.id === activeTabId) {
                     markdownContent.innerHTML = tab.content;
@@ -2040,7 +2255,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 renderTabs();
                 saveWorkspaceState();
-                showToast(`🔄 <strong>${tab.name}</strong> actualizado`, 'success');
+                showToast(`🔄 <strong>${escapeHtml(tab.name)}</strong> actualizado`, 'success');
             } catch (e) {
                 // Ignorar errores de lectura
             }
@@ -2058,6 +2273,16 @@ document.addEventListener('DOMContentLoaded', () => {
     async function saveActiveFile() {
         const activeTab = openTabs.find(t => t.id === activeTabId);
         if (!activeTab) return;
+
+        // Validación de JSON: no escribir en disco un archivo corrupto.
+        if (activeTab.isJson) {
+            try {
+                JSON.parse(activeTab.rawContent);
+            } catch (e) {
+                showToast(`JSON inválido, no se guardó: ${escapeHtml(e.message)}`, 'error', 5000);
+                return;
+            }
+        }
 
         const originalText = saveFileBtn.innerHTML;
 
@@ -2096,7 +2321,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error('Error saving file:', error);
-            alert(`Error al guardar: ${error.message}`);
+            showToast(`Error al guardar: ${escapeHtml(error.message)}`, 'warning', 5000);
         }
     }
 
@@ -2107,8 +2332,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const editorResizer = document.getElementById('editorResizer');
 
     function updateEditorVisibility() {
-        // If a Coda tab is active, the editor must stay hidden regardless of the toggle
-        const activeTabId = document.querySelector('.tab.active')?.dataset.id;
+        // If a Coda tab is active, the editor must stay hidden regardless of the toggle.
+        // Usar la variable de módulo activeTabId — los tabs no tienen dataset.id
+        // (usan dataset.tabIndex), así que el selector del DOM devolvía undefined.
         const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
         if (activeTab && activeTab.isCoda) {
             editorPanel.style.display = 'none';
@@ -2142,8 +2368,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const tocResizer = document.getElementById('tocResizer');
 
     function updateTocVisibility() {
-        // Hide TOC for Coda tabs
-        const activeTabId = document.querySelector('.tab.active')?.dataset.id;
+        // Hide TOC for Coda tabs — usar la variable de módulo activeTabId
+        // (los tabs no exponen dataset.id; ver updateEditorVisibility).
         const activeTab = activeTabId ? openTabs.find(t => t.id === activeTabId) : null;
         if (activeTab && activeTab.isCoda) {
             tocPanel.style.display = 'none';
@@ -2588,6 +2814,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchResults.innerHTML = '';
         currentSearchResults = [];
         searchSelectedIndex = -1;
+        _searchTrapRelease = createFocusTrap(searchModal);
         searchInput.focus();
         searchSpinner.style.display = 'none';
     }
@@ -2596,6 +2823,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isSearchModalOpen = false;
         searchModal.style.display = 'none';
         searchInput.blur();
+        if (_searchTrapRelease) { _searchTrapRelease(); _searchTrapRelease = null; }
         if (editorPanel.style.display === 'flex') {
             markdownEditor.focus();
         }
@@ -2735,10 +2963,10 @@ document.addEventListener('DOMContentLoaded', () => {
             div.innerHTML = `
                 <div class="search-result-title">
                     <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                    ${res.name}
+                    ${escapeHtml(res.name)}
                 </div>
-                <div class="search-result-path">${res.path}</div>
-                ${res.snippet ? `<div class="search-result-snippet">${res.snippet}</div>` : ''}
+                <div class="search-result-path">${escapeHtml(res.path)}</div>
+                ${res.snippet ? `<div class="search-result-snippet">${escapeHtml(res.snippet)}</div>` : ''}
             `;
 
             div.addEventListener('click', () => {
@@ -2819,102 +3047,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // === HORIZONTAL RESIZER (FILE TREE / CODA) ===
-    const fileTreeEl = document.getElementById('fileTreeContainer');
-    const codaResizer = document.getElementById('codaResizer');
-
-    if (sidebarEl && fileTreeEl && codaResizer) {
-        let isResizingCoda = false;
-        let startY, startHeight;
-
-        codaResizer.addEventListener('mousedown', (e) => {
-            isResizingCoda = true;
-            codaResizer.classList.add('is-resizing');
-            document.body.style.cursor = 'row-resize';
-            document.body.style.userSelect = 'none';
-            _blockWebviews();
-            
-            startY = e.clientY;
-            startHeight = fileTreeEl.getBoundingClientRect().height;
-            e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizingCoda) return;
-            const deltaY = e.clientY - startY;
-            const newHeight = startHeight + deltaY;
-            
-            // Limit minimum heights for both sections
-            const minTreeHeight = 60;
-            const minCodaHeight = 60;
-            // Ensure there's space for header etc.
-            const maxTreeHeight = sidebarEl.getBoundingClientRect().height - minCodaHeight - 50; 
-            
-            if (newHeight >= minTreeHeight && newHeight <= maxTreeHeight) {
-                fileTreeEl.style.flex = 'none';
-                fileTreeEl.style.height = newHeight + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (isResizingCoda) {
-                isResizingCoda = false;
-                codaResizer.classList.remove('is-resizing');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-                _unblockWebviews();
-            }
-        });
-    }
-
-    // === HORIZONTAL RESIZER (CODA / NOTION) ===
-    const codaSectionEl = document.getElementById('codaSection');
-    const notionResizer = document.getElementById('notionResizer');
-
-    if (sidebarEl && codaSectionEl && notionResizer) {
-        let isResizingNotion = false;
-        let startYNotion, startHeightNotion;
-
-        notionResizer.addEventListener('mousedown', (e) => {
-            isResizingNotion = true;
-            notionResizer.classList.add('is-resizing');
-            document.body.style.cursor = 'row-resize';
-            document.body.style.userSelect = 'none';
-            _blockWebviews();
-            
-            startYNotion = e.clientY;
-            startHeightNotion = codaSectionEl.getBoundingClientRect().height;
-            e.preventDefault();
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizingNotion) return;
-            const deltaY = e.clientY - startYNotion;
-            const newHeight = startHeightNotion + deltaY;
-            
-            const minCodaHeight = 60;
-            const minNotionHeight = 60;
-            const maxCodaHeight = sidebarEl.getBoundingClientRect().height - minNotionHeight - 100; // Account for tree and margins
-            
-            if (newHeight >= minCodaHeight && newHeight <= maxCodaHeight) {
-                codaSectionEl.style.flex = 'none';
-                codaSectionEl.style.height = newHeight + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (isResizingNotion) {
-                isResizingNotion = false;
-                notionResizer.classList.remove('is-resizing');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-                _unblockWebviews();
-            }
-        });
-    }
-
     // ============================================================
-    // SETTINGS MODAL + CODA/NOTION PHASE 2 (API Key)
+    // SETTINGS MODAL
     // ============================================================
     (function () {
         const api = window.api || null;
@@ -2923,139 +3057,154 @@ document.addEventListener('DOMContentLoaded', () => {
         const settingsBtn  = document.getElementById('settingsBtn');
         const closeBtn     = document.getElementById('settingsCloseBtn');
         
-        // Coda Elements
-        const apiKeyInput  = document.getElementById('codaApiKeyInput');
-        const toggleBtn    = document.getElementById('codaApiKeyToggle');
-        const saveBtn      = document.getElementById('codaApiKeySave');
-        const removeBtn    = document.getElementById('codaApiKeyRemove');
-        const statusEl     = document.getElementById('codaApiKeyStatus');
-
-        // Notion Elements
-        const notionApiKeyInput  = document.getElementById('notionApiKeyInput');
-        const notionToggleBtn    = document.getElementById('notionApiKeyToggle');
-        const notionSaveBtn      = document.getElementById('notionApiKeySave');
-        const notionRemoveBtn    = document.getElementById('notionApiKeyRemove');
-        const notionStatusEl     = document.getElementById('notionApiKeyStatus');
-
         // LLM (Ollama) Elements
         const llmEndpointInput = document.getElementById('llmEndpointInput');
         const llmDetectBtn     = document.getElementById('llmDetectBtn');
         const llmModelSelect   = document.getElementById('llmModelSelect');
         const llmSaveBtn       = document.getElementById('llmSaveBtn');
         const llmForgetBtn     = document.getElementById('llmForgetBtn');
+
+        // Claude Code
+        const claudeSkipPermsToggle = document.getElementById('claudeSkipPermsToggle');
+        const claudeSkipPermsStatus = document.getElementById('claudeSkipPermsStatus');
+        const CLAUDE_SKIP_PERMS_STORE = 'claude_skip_permissions';
+        // Modelos de Claude (lista + default), editables aquí. No son secretos.
+        const claudeModelsInput        = document.getElementById('claudeModelsInput');
+        const claudeDefaultModelSelect = document.getElementById('claudeDefaultModelSelect');
+        const claudeModelsSave         = document.getElementById('claudeModelsSave');
+        const claudeModelsStatus       = document.getElementById('claudeModelsStatus');
+        const CLAUDE_MODELS_STORE        = 'claude_models';
+        const CLAUDE_DEFAULT_MODEL_STORE = 'claude_default_model';
+        // Lista real por defecto: fuente única en chat.js (se carga antes que
+        // app.js). Formato "Etiqueta=modelo" separado por comas.
+        const CLAUDE_MODELS_DEFAULT_STR = CLAUDE_DEFAULT_MODELS_STR;
         const llmStatusEl      = document.getElementById('llmStatus');
 
         if (!modal || !settingsBtn) return;
 
-        // ---- Persist API keys in IndexedDB via the existing WorkspaceDB ----
-        const CODA_KEY_STORE = 'coda_api_key';
-        const NOTION_KEY_STORE = 'notion_api_key';
+        // ---- Settings persistidos en IndexedDB (WorkspaceDB) ----
         const LLM_ENDPOINT_STORE = 'llm_endpoint';
         const LLM_MODEL_STORE    = 'llm_model';
         const OLLAMA_DEFAULT_ENDPOINT = 'http://localhost:11434';
 
-        async function loadApiKey(storeName) {
+        // ---- IndexedDB (settings no sensibles) ----
+        async function idbGet(storeName) {
             try {
                 const db = await WorkspaceDB.getDB();
-                return new Promise((res, rej) => {
+                return new Promise((res) => {
                     const tx = db.transaction('settings', 'readonly');
-                    const store = tx.objectStore('settings');
-                    const req = store.get(storeName);
+                    const req = tx.objectStore('settings').get(storeName);
                     req.onsuccess = () => res(req.result?.value || null);
                     req.onerror  = () => res(null);
                 });
             } catch { return null; }
         }
 
-        async function saveApiKey(storeName, key) {
+        async function idbPut(storeName, key) {
             try {
                 const db = await WorkspaceDB.getDB();
-                return new Promise((res, rej) => {
+                return new Promise((res) => {
                     const tx = db.transaction('settings', 'readwrite');
-                    const store = tx.objectStore('settings');
-                    const req = store.put({ key: storeName, value: key });
+                    const req = tx.objectStore('settings').put({ key: storeName, value: key });
                     req.onsuccess = () => res(true);
                     req.onerror  = () => res(false);
                 });
             } catch { return false; }
         }
 
-        async function deleteApiKey(storeName) {
+        async function idbDelete(storeName) {
             try {
                 const db = await WorkspaceDB.getDB();
                 return new Promise((res) => {
                     const tx = db.transaction('settings', 'readwrite');
-                    const store = tx.objectStore('settings');
-                    store.delete(storeName);
+                    tx.objectStore('settings').delete(storeName);
                     tx.oncomplete = () => res(true);
+                    tx.onerror = () => res(false);
                 });
             } catch { return false; }
         }
 
-        // ---- Coda API helper ----
-        async function codaGet(apiPath, apiKey) {
-            if (!api) {
-                // Fallback for non-Electron (dev): direct fetch (may fail CORS)
-                const r = await fetch(`https://coda.io/apis/v1${apiPath}`, {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
-                });
-                return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
-            }
-            return api.codaApiRequest({ path: apiPath, apiKey });
-        }
-
-        // ---- Notion API helper ----
-        async function notionReq(apiPath, method = 'GET', body = null, apiKey) {
-            if (!api) {
-                const r = await fetch(`https://api.notion.com/v1${apiPath}`, {
-                    method,
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Notion-Version': '2022-06-28',
-                        'Content-Type': 'application/json'
-                    },
-                    body: body ? JSON.stringify(body) : null
-                });
-                return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : null };
-            }
-            return api.notionApiRequest({ path: apiPath, method, body, apiKey });
-        }
-
         // ---- Open / Close modal ----
+        let _settingsTrapRelease = null;
         function openModal() {
             modal.style.display = 'flex';
-            
-            // Coda
-            loadApiKey(CODA_KEY_STORE).then(key => {
-                if (key) {
-                    apiKeyInput.value = key;
-                    removeBtn.style.display = 'inline-flex';
-                    setStatus(statusEl, '✓ Conectado', 'ok');
-                } else {
-                    apiKeyInput.value = '';
-                    removeBtn.style.display = 'none';
-                    setStatus(statusEl, '', '');
-                }
-            });
-
-            // Notion
-            loadApiKey(NOTION_KEY_STORE).then(key => {
-                if (key) {
-                    notionApiKeyInput.value = key;
-                    notionRemoveBtn.style.display = 'inline-flex';
-                    setStatus(notionStatusEl, '✓ Conectado', 'ok');
-                } else {
-                    notionApiKeyInput.value = '';
-                    notionRemoveBtn.style.display = 'none';
-                    setStatus(notionStatusEl, '', '');
-                }
-            });
+            _settingsTrapRelease = createFocusTrap(modal);
 
             // Ollama
             loadOllamaSettings();
+
+            // Claude Code — estado del toggle de skip-permissions
+            if (claudeSkipPermsToggle) {
+                idbGet(CLAUDE_SKIP_PERMS_STORE).then(v => {
+                    claudeSkipPermsToggle.checked = (v === true || v === 'true');
+                });
+            }
+
+            // Claude Code — lista de modelos + default
+            if (claudeModelsInput) {
+                Promise.all([idbGet(CLAUDE_MODELS_STORE), idbGet(CLAUDE_DEFAULT_MODEL_STORE)])
+                    .then(([raw, def]) => {
+                        claudeModelsInput.value = (typeof raw === 'string' && raw.trim())
+                            ? raw : CLAUDE_MODELS_DEFAULT_STR;
+                        syncClaudeModelOptions(def || '');
+                    });
+            }
         }
 
-        function closeModal() { modal.style.display = 'none'; }
+        // Repuebla el <select> de default a partir del input de modelos,
+        // conservando (o fijando) la selección indicada.
+        function syncClaudeModelOptions(selected) {
+            if (!claudeDefaultModelSelect) return;
+            const want = selected != null ? selected : claudeDefaultModelSelect.value;
+            const models = (claudeModelsInput?.value || '')
+                .split(/[,\n]/).map(s => s.trim()).filter(Boolean)
+                .map(entry => {
+                    const eq = entry.indexOf('=');
+                    return eq === -1
+                        ? { label: entry, value: entry }
+                        : { label: entry.slice(0, eq).trim(), value: entry.slice(eq + 1).trim() };
+                })
+                .filter(m => m.value);
+            claudeDefaultModelSelect.innerHTML = '<option value="">— del CLI —</option>';
+            for (const m of models) {
+                const opt = document.createElement('option');
+                opt.value = m.value;
+                opt.textContent = m.label;
+                if (m.value === want) opt.selected = true;
+                claudeDefaultModelSelect.appendChild(opt);
+            }
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            if (_settingsTrapRelease) { _settingsTrapRelease(); _settingsTrapRelease = null; }
+        }
+
+        // Persistir el toggle de skip-permissions al cambiarlo (no es secreto).
+        if (claudeSkipPermsToggle) {
+            claudeSkipPermsToggle.addEventListener('change', async () => {
+                const enabled = claudeSkipPermsToggle.checked;
+                await idbPut(CLAUDE_SKIP_PERMS_STORE, enabled);
+                if (claudeSkipPermsStatus) {
+                    setStatus(claudeSkipPermsStatus, enabled ? '⚠️ Activado' : 'Desactivado', enabled ? 'warn' : 'ok');
+                }
+            });
+        }
+
+        // Al editar la lista, repuebla el <select> de default (conserva selección).
+        if (claudeModelsInput) {
+            claudeModelsInput.addEventListener('input', () => syncClaudeModelOptions());
+        }
+        // Guardar lista + default de modelos de Claude.
+        if (claudeModelsSave) {
+            claudeModelsSave.addEventListener('click', async () => {
+                const list = (claudeModelsInput?.value || '').trim();
+                const def  = claudeDefaultModelSelect?.value || '';
+                await idbPut(CLAUDE_MODELS_STORE, list);
+                await idbPut(CLAUDE_DEFAULT_MODEL_STORE, def);
+                if (claudeModelsStatus) setStatus(claudeModelsStatus, 'Guardado', 'ok');
+            });
+        }
 
         settingsBtn.addEventListener('click', openModal);
         closeBtn.addEventListener('click', closeModal);
@@ -3065,87 +3214,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.key === 'Escape' && modal.style.display !== 'none') closeModal();
         });
 
-        // Toggle password visibility
-        toggleBtn.addEventListener('click', () => {
-            apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
-        });
-        notionToggleBtn.addEventListener('click', () => {
-            notionApiKeyInput.type = notionApiKeyInput.type === 'password' ? 'text' : 'password';
-        });
-
         function setStatus(el, msg, cls) {
             el.textContent = msg;
             el.className = 'settings-status' + (cls ? ` ${cls}` : '');
         }
 
-        // ---- Save & connect Coda ----
-        saveBtn.addEventListener('click', async () => {
-            const key = apiKeyInput.value.trim();
-            if (!key) { setStatus(statusEl, 'Introduce tu API Key', 'err'); return; }
-
-            setStatus(statusEl, 'Conectando...', '');
-            saveBtn.disabled = true;
-
-            const result = await codaGet('/whoami', key);
-            saveBtn.disabled = false;
-
-            if (result.ok && result.data) {
-                await saveApiKey(CODA_KEY_STORE, key);
-                currentCodaApiKey = key;
-                removeBtn.style.display = 'inline-flex';
-                setStatus(statusEl, `✓ Conectado como ${result.data.name || result.data.loginId || 'usuario'}`, 'ok');
-                await loadCodaTree();
-            } else {
-                setStatus(statusEl, 'API Key inválida o sin conexión', 'err');
-            }
-        });
-
-        // ---- Save & connect Notion ----
-        notionSaveBtn.addEventListener('click', async () => {
-            const key = notionApiKeyInput.value.trim();
-            if (!key) { setStatus(notionStatusEl, 'Introduce tu API Key', 'err'); return; }
-
-            setStatus(notionStatusEl, 'Conectando...', '');
-            notionSaveBtn.disabled = true;
-
-            const result = await notionReq('/users/me', 'GET', null, key);
-            notionSaveBtn.disabled = false;
-
-            if (result.ok && result.data) {
-                await saveApiKey(NOTION_KEY_STORE, key);
-                currentNotionApiKey = key;
-                notionRemoveBtn.style.display = 'inline-flex';
-                setStatus(notionStatusEl, `✓ Conectado como ${result.data.name || 'bot'}`, 'ok');
-                await loadNotionTree();
-            } else {
-                setStatus(notionStatusEl, 'API Key inválida o sin conexión', 'err');
-            }
-        });
-
-        // ---- Remove Coda ----
-        removeBtn.addEventListener('click', async () => {
-            await deleteApiKey(CODA_KEY_STORE);
-            currentCodaApiKey = null;
-            apiKeyInput.value = '';
-            removeBtn.style.display = 'none';
-            setStatus(statusEl, 'Desconectado', '');
-            clearCodaApiTree();
-        });
-
-        // ---- Remove Notion ----
-        notionRemoveBtn.addEventListener('click', async () => {
-            await deleteApiKey(NOTION_KEY_STORE);
-            currentNotionApiKey = null;
-            notionApiKeyInput.value = '';
-            notionRemoveBtn.style.display = 'none';
-            setStatus(notionStatusEl, 'Desconectado', '');
-            clearNotionApiTree();
-        });
-
         // ---- Ollama: load, detect, save, forget ----
         async function loadOllamaSettings() {
-            const endpoint = await loadApiKey(LLM_ENDPOINT_STORE);
-            const model    = await loadApiKey(LLM_MODEL_STORE);
+            const endpoint = await idbGet(LLM_ENDPOINT_STORE);
+            const model    = await idbGet(LLM_MODEL_STORE);
             llmEndpointInput.value = endpoint || '';
 
             if (endpoint && model) {
@@ -3219,16 +3296,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 setStatus(llmStatusEl, 'Selecciona un modelo (pulsa Detectar)', 'err');
                 return;
             }
-            await saveApiKey(LLM_ENDPOINT_STORE, endpoint);
-            await saveApiKey(LLM_MODEL_STORE, model);
+            await idbPut(LLM_ENDPOINT_STORE, endpoint);
+            await idbPut(LLM_MODEL_STORE, model);
             llmForgetBtn.style.display = 'inline-flex';
             setStatus(llmStatusEl, '✓ Conectado a ' + model, 'ok');
             window.dispatchEvent(new CustomEvent('llm-config-changed'));
         });
 
         llmForgetBtn.addEventListener('click', async () => {
-            await deleteApiKey(LLM_ENDPOINT_STORE);
-            await deleteApiKey(LLM_MODEL_STORE);
+            await idbDelete(LLM_ENDPOINT_STORE);
+            await idbDelete(LLM_MODEL_STORE);
             llmEndpointInput.value = '';
             llmForgetBtn.style.display = 'none';
             resetModelSelect('— Pulsa el botón de la derecha para detectar —');
@@ -3236,347 +3313,12 @@ document.addEventListener('DOMContentLoaded', () => {
             window.dispatchEvent(new CustomEvent('llm-config-changed'));
         });
 
-        // ---- Bootstrap on load ----
-        let currentCodaApiKey = null;
-        let currentNotionApiKey = null;
-
-        loadApiKey(CODA_KEY_STORE).then(async key => {
-            if (key) {
-                currentCodaApiKey = key;
-                await loadCodaTree();
-            }
-        });
-
-        loadApiKey(NOTION_KEY_STORE).then(async key => {
-            if (key) {
-                currentNotionApiKey = key;
-                await loadNotionTree();
-            }
-        });
-
-        // ---- Load & render document tree ----
-        async function loadCodaTree() {
-            if (!currentCodaApiKey) return;
-            const codaSection = document.getElementById('codaSection');
-            const codaResizer = document.getElementById('codaResizer');
-            if (!codaSection) return;
-
-            codaSection.style.display = 'flex';
-            if (codaResizer) codaResizer.style.display = 'block';
-
-            // Show loading state
-            let treeEl = codaSection.querySelector('.coda-api-tree');
-            if (!treeEl) {
-                treeEl = document.createElement('ul');
-                treeEl.className = 'coda-api-tree';
-                codaSection.appendChild(treeEl);
-            }
-            treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Cargando documentos...</li>';
-
-            const result = await codaGet('/docs?limit=50', currentCodaApiKey);
-            if (!result.ok || !result.data) {
-                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:#e53e3e;">Error al cargar docs</li>';
-                return;
-            }
-
-            const docs = result.data.items || [];
-            treeEl.innerHTML = '';
-
-            if (docs.length === 0) {
-                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Sin documentos</li>';
-                return;
-            }
-
-            docs.forEach(doc => {
-                const li = document.createElement('li');
-                li.className = 'coda-api-doc';
-                li.innerHTML = `
-                    <div class="coda-api-doc-header">
-                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
-                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
-                        <span>${doc.name}</span>
-                    </div>
-                    <ul class="coda-api-pages"></ul>
-                `;
-
-                const header = li.querySelector('.coda-api-doc-header');
-                const pagesUl = li.querySelector('.coda-api-pages');
-                let loaded = false;
-
-                header.addEventListener('click', async () => {
-                    li.classList.toggle('expanded');
-                    if (li.classList.contains('expanded') && !loaded) {
-                        loaded = true;
-                        pagesUl.innerHTML = '<li style="padding:4px 8px;font-size:0.78rem;color:var(--text-muted);">Cargando p\u00e1ginas...</li>';
-
-                         // ---- Fetch ALL pages (handle Coda pagination) ----
-                        let allPages = [];
-                        let nextPageToken = null;
-                        let hasError = false;
-                        let errorMsg = '';
-
-                        try {
-                            do {
-                                const url = nextPageToken
-                                    ? `/docs/${doc.id}/pages?pageToken=${encodeURIComponent(nextPageToken)}`
-                                    : `/docs/${doc.id}/pages`;
-                                const pr = await codaGet(url, currentCodaApiKey);
-                                if (pr.ok && pr.data && Array.isArray(pr.data.items)) {
-                                    allPages = allPages.concat(pr.data.items);
-                                    nextPageToken = pr.data.nextPageToken || null;
-                                } else {
-                                    errorMsg = `HTTP ${pr.status} — ${JSON.stringify(pr.data).slice(0,120)}`;
-                                    hasError = true;
-                                    break;
-                                }
-                            } while (nextPageToken);
-                        } catch (ex) {
-                            hasError = true;
-                            errorMsg = ex.message || String(ex);
-                        }
-
-                        console.log('[Coda] Loaded', allPages.length, 'pages, hasError:', hasError);
-                        pagesUl.innerHTML = '';
-
-                        if (hasError) {
-                            pagesUl.innerHTML = `<li style="padding:4px 8px;font-size:0.78rem;color:#e53e3e;word-wrap:break-word;">Error: ${errorMsg}</li>`;
-                        } else if (allPages.length > 0) {
-                            // ---- Build parent→children map ----
-                            const pageMap = {};
-                            allPages.forEach(p => { pageMap[p.id] = { ...p, children: [] }; });
-
-                            const rootPages = [];
-                            allPages.forEach(p => {
-                                const parentId = p.parent?.id;
-                                if (parentId && pageMap[parentId]) {
-                                    pageMap[parentId].children.push(pageMap[p.id]);
-                                } else {
-                                    rootPages.push(pageMap[p.id]);
-                                }
-                            });
-
-                            // ---- Recursive tree renderer ----
-                            function renderPageNode(pageNode, containerUl) {
-                                const wrap = document.createElement('li');
-                                wrap.className = 'coda-api-page-item-container';
-
-                                const row = document.createElement('div');
-                                row.className = 'coda-api-page-item';
-
-                                const hasKids = pageNode.children.length > 0;
-                                const arrowSvg = hasKids
-                                    ? '<svg class="coda-folder-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>'
-                                    : '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
-
-                                row.innerHTML = `${arrowSvg}<span>${pageNode.name}</span>`;
-                                wrap.appendChild(row);
-
-                                if (hasKids) {
-                                    const childUl = document.createElement('ul');
-                                    childUl.style.cssText = 'display:none;list-style:none;padding-left:14px;margin:0;';
-                                    wrap.appendChild(childUl);
-
-                                    pageNode.children.forEach(child => renderPageNode(child, childUl));
-
-                                    const arrow = row.querySelector('.coda-folder-icon');
-                                    if (arrow) {
-                                        arrow.style.cursor = 'pointer';
-                                        arrow.style.transition = 'transform 0.15s';
-                                        arrow.addEventListener('click', (e) => {
-                                            e.stopPropagation();
-                                            const open = childUl.style.display === 'block';
-                                            childUl.style.display = open ? 'none' : 'block';
-                                            arrow.style.transform = open ? '' : 'rotate(90deg)';
-                                        });
-                                    }
-                                }
-
-                                row.addEventListener('click', () => openCodaApiPage(doc, pageNode, row));
-                                const codaUrl = pageNode.browserLink || `https://coda.io/d/${doc.id}/${pageNode.id}`;
-                                row.appendChild(createCopyPathBtn(codaUrl));
-                                containerUl.appendChild(wrap);
-                            }
-
-                            rootPages.forEach(p => renderPageNode(p, pagesUl));
-
-                        } else {
-                            pagesUl.innerHTML = '<li style="padding:4px 8px;font-size:0.78rem;color:var(--text-muted);">Sin p\u00e1ginas</li>';
-                        }
-                    }
-                });
-
-                treeEl.appendChild(li);
-            });
-        }
-
-        function clearCodaApiTree() {
-            const codaSection = document.getElementById('codaSection');
-            const codaResizer = document.getElementById('codaResizer');
-            if (codaSection) codaSection.style.display = 'none';
-            if (codaResizer) codaResizer.style.display = 'none';
-            
-            const treeEl = codaSection?.querySelector('.coda-api-tree');
-            if (treeEl) treeEl.remove();
-        }
-
-        // ---- Refresh buttons ----
-        document.getElementById('refreshCodaBtn')?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const btn = e.currentTarget;
-            btn.classList.add('spinning');
-            await loadCodaTree();
-            btn.classList.remove('spinning');
-            showToast('Árbol de Coda actualizado', 'success');
-        });
-
-        document.getElementById('refreshNotionBtn')?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const btn = e.currentTarget;
-            btn.classList.add('spinning');
-            await loadNotionTree();
-            btn.classList.remove('spinning');
-            showToast('Árbol de Notion actualizado', 'success');
-        });
-
-        // ---- Open a Coda page via API ----
-        async function openCodaApiPage(doc, page, clickedEl) {
-            // Mark active in tree
-            document.querySelectorAll('.coda-api-page-item').forEach(el => el.classList.remove('active'));
-            if (clickedEl) clickedEl.classList.add('active');
-
-            // Check if already open
-            const tabId = `coda-api:${doc.id}:${page.id}`;
-            const existing = openTabs.find(t => t.id === tabId);
-            if (existing) { setActiveTab(tabId); return; }
-
-            // Use browserLink from the API — the exact correct Coda page URL
-            const pageUrl = page.browserLink || `https://coda.io/d/${doc.id}/${page.id}`;
-
-            const tab = {
-                id: tabId,
-                name: page.name,
-                path: null,
-                handle: null,
-                isLocal: false, isNode: false, isHtml: false,
-                isCoda: true,
-                codaId: tabId,
-                codaEmbedUrl: pageUrl,
-                content: '', rawContent: '', savedContent: '', dirty: false
-            };
-
-            openTabs.push(tab);
-            setActiveTab(tabId);
-            saveWorkspaceState();
-        }
-
-        // ---- Load & render Notion tree ----
-        async function loadNotionTree() {
-            if (!currentNotionApiKey) return;
-            const notionSection = document.getElementById('notionSection');
-            const notionResizer = document.getElementById('notionResizer');
-            if (!notionSection) return;
-
-            notionSection.style.display = 'flex';
-            if (notionResizer) notionResizer.style.display = 'block';
-
-            let treeEl = notionSection.querySelector('.coda-api-tree'); // Reuse Coda classes for styling
-            if (!treeEl) {
-                treeEl = document.createElement('ul');
-                treeEl.className = 'coda-api-tree notion-api-tree';
-                notionSection.appendChild(treeEl);
-            }
-            treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Cargando docs...</li>';
-
-            // Notion search endpoint retrieves pages/databases shared with integration
-            const result = await notionReq('/search', 'POST', {
-                "filter": { "value": "page", "property": "object" },
-                "sort": { "direction": "descending", "timestamp": "last_edited_time" }
-            }, currentNotionApiKey);
-
-            if (!result.ok || !result.data) {
-                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:#e53e3e;">Error al cargar Notion</li>';
-                return;
-            }
-
-            const pages = result.data.results || [];
-            treeEl.innerHTML = '';
-
-            if (pages.length === 0) {
-                treeEl.innerHTML = '<li style="padding:6px 12px;font-size:0.78rem;color:var(--text-muted);">Sin páginas (recuerda compartir tus páginas en Notion)</li>';
-                return;
-            }
-
-            pages.forEach(page => {
-                const li = document.createElement('li');
-                li.className = 'coda-api-page-item-container'; // Reuse class
-
-                const row = document.createElement('div');
-                row.className = 'coda-api-page-item';
-                
-                // Try to extract a title
-                let title = 'Untitled';
-                if (page.properties) {
-                    const titleProp = Object.values(page.properties).find(p => p.type === 'title');
-                    if (titleProp && titleProp.title && titleProp.title.length > 0) {
-                        title = titleProp.title[0].plain_text;
-                    }
-                }
-                
-                row.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>${title}</span>`;
-                
-                row.addEventListener('click', () => openNotionApiPage(page, title, row));
-                const notionUrl = page.url || `https://notion.so/${page.id.replace(/-/g, '')}`;
-                row.appendChild(createCopyPathBtn(notionUrl));
-
-                li.appendChild(row);
-                treeEl.appendChild(li);
-            });
-        }
-
-        function clearNotionApiTree() {
-            const notionSection = document.getElementById('notionSection');
-            const notionResizer = document.getElementById('notionResizer');
-            if (notionSection) notionSection.style.display = 'none';
-            if (notionResizer) notionResizer.style.display = 'none';
-
-            const treeEl = notionSection?.querySelector('.notion-api-tree');
-            if (treeEl) treeEl.remove();
-        }
-
-        async function openNotionApiPage(page, title, clickedEl) {
-            document.querySelectorAll('.coda-api-page-item').forEach(el => el.classList.remove('active'));
-            if (clickedEl) clickedEl.classList.add('active');
-
-            const tabId = `notion-api:${page.id}`;
-            const existing = openTabs.find(t => t.id === tabId);
-            if (existing) { setActiveTab(tabId); return; }
-
-            // Using Notion webview Option A for now
-            const pageUrl = page.url || `https://notion.so/${page.id.replace(/-/g, '')}`;
-
-            const tab = {
-                id: tabId,
-                name: title,
-                path: null,
-                handle: null,
-                isLocal: false, isNode: false, isHtml: false,
-                isCoda: true, // Reuse coda webview mechanism for simplicity
-                codaId: tabId,
-                codaEmbedUrl: pageUrl,
-                content: '', rawContent: '', savedContent: '', dirty: false
-            };
-
-            openTabs.push(tab);
-            setActiveTab(tabId);
-            saveWorkspaceState();
-        }
-
-        // Expose so Phase 1 can also call openModal
+        // Expuesto para abrir Ajustes desde otras partes de la app
         window._openSettingsModal = openModal;
     })();
 
     // ============================================================
-    // CODA INTEGRATION — Webview Panel Controls
+    // WEBVIEW PANEL (prototipos) — los ids/flags "coda" son históricos
     // ============================================================
     (function () {
         const codaPanel  = document.getElementById('codaPanel');
@@ -3586,7 +3328,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let currentWebviewUrl = '';
 
-        // ---- Expose Coda panel switcher for setActiveTab ----
+        // ---- Expose webview panel switcher for setActiveTab ----
         window._showCodaPanel = (url) => {
             codaPanel.style.display = 'flex';
             if (url === currentWebviewUrl) return;

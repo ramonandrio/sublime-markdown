@@ -104,24 +104,6 @@ body {
     background-color: var(--text-accent);
 }
 
-/* Resizer Horizontal (Sidebar) */
-.sidebar-horizontal-resizer {
-    height: 6px;
-    background-color: transparent;
-    cursor: row-resize;
-    z-index: 10;
-    transition: background-color 0.2s;
-    flex-shrink: 0;
-    margin-top: -3px;
-    margin-bottom: -3px;
-    position: relative;
-}
-
-.sidebar-horizontal-resizer:hover,
-.sidebar-horizontal-resizer.is-resizing {
-    background-color: var(--text-accent);
-}
-
 .sidebar-header h2 {
     text-transform: uppercase;
     font-size: 0.75rem;
@@ -306,8 +288,7 @@ body {
     background: rgba(124, 58, 237, 0.1);
 }
 
-.tree-item:hover .copy-path-btn,
-.coda-api-page-item:hover .copy-path-btn {
+.tree-item:hover .copy-path-btn {
     display: inline-flex;
 }
 
@@ -1081,6 +1062,11 @@ body {
     border-left: 3px solid var(--text-accent);
 }
 
+.toast-error {
+    border-left: 3px solid #cf222e;
+    background: #ffebe9;
+}
+
 @media (max-width: 768px) {
 
     /* Hamburger button */
@@ -1482,6 +1468,27 @@ body {
     font-size: 0.85rem;
     line-height: 1;
     vertical-align: middle;
+}
+
+/* Pestaña con un proceso finalizado: el buffer sigue visible (scrollback
+   preservado) hasta que el usuario cierra el pane. */
+.terminal-tab.pane-exited .terminal-tab-name {
+    opacity: 0.6;
+}
+.terminal-tab.pane-exited .terminal-tab-name::after {
+    content: '✓';
+    color: var(--text-muted);
+    margin-left: 6px;
+    font-size: 0.8rem;
+}
+
+/* Botón de acción destructiva en el modal de confirmación. */
+.welcome-cta.danger {
+    background: #e53e3e;
+    border-color: #e53e3e;
+}
+.welcome-cta.danger:hover {
+    background: #c53030;
 }
 
 /* Toast in-app: aviso de pane idle cuando la app tiene foco. Reemplaza a la
@@ -1913,6 +1920,17 @@ body {
     font-size: 10px;
 }
 
+/* Sub-ítems de modelo (p.ej. modelos de Claude bajo "Claude"): indentados
+   para leerse como hijos del perfil superior. */
+.pane-profile-subitem {
+    padding-left: 26px;
+    opacity: 0.9;
+}
+
+.pane-profile-subitem .pane-profile-icon {
+    opacity: 0.6;
+}
+
 /* Área del terminal xterm dentro del pane */
 .pane-terminal {
     flex: 1;
@@ -2162,205 +2180,7 @@ mark.find-highlight.find-current {
     border-radius: 2px;
 }
 
-/* ---- Coda Pages Sidebar Section ---- */
-.coda-section {
-    border-top: 1px solid var(--border-color);
-    padding: 8px 0 4px 0;
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 20%;
-    overflow: hidden;
-}
-
-.coda-section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 12px;
-}
-
-.refresh-section-btn {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 2px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    opacity: 0;
-    transition: opacity 0.15s, color 0.15s;
-}
-
-.coda-section-header:hover .refresh-section-btn {
-    opacity: 1;
-}
-
-.refresh-section-btn:hover {
-    color: var(--text-accent);
-    background: rgba(124, 58, 237, 0.1);
-}
-
-.refresh-section-btn.spinning svg {
-    animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.coda-section-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.75rem;
-    font-weight: normal;
-    color: var(--text-muted);
-    cursor: pointer;
-    letter-spacing: 0.05em;
-}
-
-.coda-add-btn {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 0 2px;
-    border-radius: 4px;
-    transition: color 0.15s, background 0.15s;
-}
-
-.coda-add-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-}
-
-.coda-page-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    overflow-y: auto;
-    flex: 1;
-}
-
-.coda-page-item {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    padding: 0;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.82rem;
-    color: var(--text-muted);
-    transition: background 0.12s, color 0.12s;
-    position: relative;
-}
-
-.coda-page-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.coda-page-item.active {
-    background: rgba(59, 130, 246, 0.12);
-    color: var(--text-accent, #3b82f6);
-}
-
-.coda-page-link {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.coda-page-icon {
-    flex-shrink: 0;
-    opacity: 0.7;
-}
-
-.coda-page-remove {
-    display: none;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 4px 8px;
-    font-size: 13px;
-    border-radius: 4px;
-    opacity: 0.7;
-}
-
-.coda-page-item:hover .coda-page-remove {
-    display: flex;
-}
-
-.coda-page-remove:hover {
-    color: #e53e3e;
-    opacity: 1;
-}
-
-.coda-add-form {
-    padding: 6px 12px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.coda-add-form input {
-    width: 100%;
-    box-sizing: border-box;
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    padding: 5px 8px;
-    font-size: 12px;
-    background: var(--bg-dark);
-    color: var(--text-primary);
-    outline: none;
-}
-
-.coda-add-form input:focus {
-    border-color: var(--accent-color, #0066ff);
-}
-
-.coda-add-actions {
-    display: flex;
-    gap: 6px;
-}
-
-.coda-btn-confirm, .coda-btn-cancel {
-    flex: 1;
-    border: none;
-    border-radius: 5px;
-    padding: 5px 8px;
-    font-size: 12px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background 0.15s;
-}
-
-.coda-btn-confirm {
-    background: var(--accent-color, #3b82f6);
-    color: white;
-}
-
-.coda-btn-confirm:hover { filter: brightness(1.1); }
-
-.coda-btn-cancel {
-    background: var(--bg-hover);
-    color: var(--text-muted);
-}
-
-.coda-btn-cancel:hover { background: var(--bg-darker); }
-
-/* Coda iframe panel */
+/* Webview panel (prototipos) */
 #codaPanel {
     display: none;
     flex: 1;
@@ -2376,7 +2196,7 @@ mark.find-highlight.find-current {
     display: block;
 }
 
-/* Tab icon for Coda tabs */
+/* Tab icon for webview tabs */
 .tab .coda-tab-icon {
     width: 12px;
     height: 12px;
@@ -2592,80 +2412,131 @@ mark.find-highlight.find-current {
 .settings-status.ok   { color: #38a169; }
 .settings-status.err  { color: #e53e3e; }
 
-/* Coda API tree items (under Coda section in sidebar) */
-.coda-api-tree {
-    list-style: none;
-    padding: 0;
+/* ── Visor de JSON ─────────────────────────────────────────────────────────── */
+.json-view {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+/* Vista formateada: reutiliza el bloque hljs pero con fondo y borde propios */
+.json-formatted pre.hljs {
     margin: 0;
-    overflow-y: auto;
-    flex: 1;
+    padding: 16px 18px;
+    background: var(--bg-darker);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: auto;
 }
 
-.coda-api-doc {
-    margin-bottom: 2px;
+.json-formatted code {
+    font-family: var(--font-mono);
+    white-space: pre;
 }
 
-.coda-api-doc-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 12px;
-    font-size: 0.82rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.1s, color 0.1s;
+/* Aviso de JSON inválido (mientras se edita) */
+.json-error {
+    background: #ffebe9;
+    color: #cf222e;
+    border: 1px solid #ff818266;
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    font-family: var(--font-ui);
+    font-size: 13px;
 }
 
-.coda-api-doc-header:hover {
-    background: var(--bg-hover);
+.json-raw {
+    margin: 0;
+    padding: 16px 18px;
+    background: var(--bg-darker);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: auto;
+    white-space: pre;
     color: var(--text-primary);
 }
 
-.coda-api-doc-header svg { flex-shrink: 0; }
+/* Vista árbol plegable */
+.json-tree {
+    padding: 8px 4px;
+}
 
-.coda-api-pages {
-    list-style: none;
-    padding: 0 0 0 18px;
-    margin: 0;
+.json-node {
+    position: relative;
+}
+
+.json-children {
+    padding-left: 18px;
+    border-left: 1px dashed var(--border-color);
+    margin-left: 5px;
+}
+
+.json-leaf {
+    padding: 1px 0 1px 18px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.json-brace-close {
+    padding: 1px 0;
+    white-space: pre-wrap;
+}
+
+.json-row {
+    padding: 1px 0;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    user-select: none;
+}
+
+.json-row:hover {
+    background: var(--bg-hover);
+}
+
+.json-row:focus-visible {
+    outline: 2px solid var(--bg-selection);
+    outline-offset: -2px;
+}
+
+.json-toggle {
+    display: inline-block;
+    width: 18px;
+    color: var(--text-muted);
+    font-size: 10px;
+    text-align: center;
+}
+
+/* Al plegar: ocultamos hijos y la llave de cierre en su propia línea */
+.json-branch.collapsed > .json-children,
+.json-branch.collapsed > .json-brace-close {
     display: none;
 }
 
-.coda-api-doc.expanded > .coda-api-pages { display: block; }
-
-.coda-api-page-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    font-size: 0.8rem;
+.json-count {
     color: var(--text-muted);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background 0.1s, color 0.1s;
+    font-size: 11px;
+    margin: 0 4px;
 }
 
-.coda-api-page-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
+/* La llave de cierre inline (junto al contador) solo se ve al plegar */
+.json-close-inline {
+    display: none;
 }
 
-.coda-api-page-item.active {
-    color: var(--text-accent, #3b82f6);
-    background: rgba(59, 130, 246, 0.1);
+.json-branch.collapsed > .json-row .json-close-inline {
+    display: inline;
 }
 
-.coda-folder-icon {
-    transition: transform 0.15s ease-in-out;
-    cursor: pointer;
-    border-radius: 2px;
+.json-branch.collapsed > .json-row .json-count::after {
+    content: ' …';
 }
 
-.coda-folder-icon:hover {
-    background: rgba(100, 100, 100, 0.2);
-}
-
-.coda-api-page-item-container {
-    display: flex;
-    flex-direction: column;
-}
+/* Colores por tipo de valor (paleta GitHub light) */
+.json-key    { color: #0550ae; }
+.json-index  { color: var(--text-muted); }
+.json-string { color: #0a7c2f; }
+.json-number { color: #0550ae; }
+.json-bool   { color: #cf222e; }
+.json-null   { color: #6e7781; font-style: italic; }
+.json-punct  { color: var(--text-muted); }

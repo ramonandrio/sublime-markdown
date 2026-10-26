@@ -17,9 +17,6 @@ contextBridge.exposeInMainWorld('api', {
     // Path relativo al ROOT_DIR; validado en main.
     openPathInBrowser: (relPath) => ipcRenderer.invoke('open-path-in-browser', relPath),
 
-    codaApiRequest:   (payload) => ipcRenderer.invoke('coda-api-request', payload),
-    notionApiRequest: (payload) => ipcRenderer.invoke('notion-api-request', payload),
-
     // Proxy HTTP a Ollama (típicamente http://localhost:11434). Sólo para
     // listar modelos — la conversación la lleva el CLI `ollama` en un terminal.
     ollamaApiRequest: (payload) => ipcRenderer.invoke('ollama-api-request', payload),
@@ -28,6 +25,10 @@ contextBridge.exposeInMainWorld('api', {
     protoServerStop:  (folderPath) => ipcRenderer.invoke('proto-server-stop', folderPath),
 
     terminalStart: (opts) => ipcRenderer.invoke('terminal-start', opts),
+
+    // Persistencia del scrollback (recuperación tras cierre/crash)
+    terminalHistorySave:   (payload) => ipcRenderer.invoke('terminal-history-save', payload),
+    terminalHistoryReveal: ()        => ipcRenderer.invoke('terminal-history-reveal'),
 
     // ── Send (fire-and-forget) ───────────────────────────────────────────────
     terminalInput:  (id, input)       => ipcRenderer.send('terminal-input',  { id, input }),

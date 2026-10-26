@@ -12,6 +12,8 @@
  *   writeToTerminal(id, input)
  *   killTerminal(id)
  *   resizeTerminal(id, cols, rows)
+ *   count(ownerId?)
+ *   killByOwner(ownerId)
  *   killAll()
  */
 
@@ -23,7 +25,7 @@ const path = require('path');
 // crypto.randomUUID() is available since Node 14.17 – no extra dependency needed
 const uuidv4 = () => crypto.randomUUID();
 
-// Map: id -> { ptyProcess, onData, onExit }
+// Map: id -> { ptyProcess, onData, onExit, ownerId }
 const terminals = new Map();
 
 /**
@@ -33,9 +35,10 @@ const terminals = new Map();
  * @param {string}       command  - Shell executable (e.g. 'bash', 'zsh')
  * @param {Function}     onData   - Called with (id, data, type) on stdout/stderr
  * @param {Function}     onExit   - Called with (id, exitCode) when process exits
+ * @param {number|null}  ownerId  - webContents id of the window that owns it
  * @returns {string}              - Unique id for the new terminal instance
  */
-function startTerminal(cwd, command, onData, onExit) {
+function startTerminal(cwd, command, onData, onExit, ownerId = null) {
     const id = uuidv4();
 
     // Resolve a sane working directory
@@ -65,18 +68,35 @@ function startTerminal(cwd, command, onData, onExit) {
         args.push('--rcfile', rcFile);
     }
 
+    // Cada terminal debe ser una sesión de Claude Code de nivel superior y
+    // persistente. Si CompassAI se lanzó desde dentro de otra sesión de Claude
+    // (p. ej. Claude Code, vía su herramienta de shell), heredó marcadores que
+    // le dicen a un `claude` hijo "eres una sub-sesión → no guardes transcript",
+    // rompiendo `claude --resume`. Los eliminamos para arrancar limpio, además
+    // del SESSION_ID heredado (que sería el de OTRA sesión, no la de este PTY).
+    const childEnv = {
+        ...process.env,
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+        ...extraEnv
+    };
+    delete childEnv.CLAUDE_CODE_CHILD_SESSION;
+    delete childEnv.CLAUDE_CODE_SESSION_ID;
+
+    // Prefijo para las sesiones de Remote Control auto-nombradas (p. ej. al
+    // activar RC con /remote-control desde el botón del pane). Así se reconocen
+    // como lanzadas desde CompassAI en claude.ai/code. Si el usuario ya definió
+    // su propio prefijo, se respeta.
+    childEnv.CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX =
+        childEnv.CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX || 'compass';
+
     // Spawn with sensible defaults
     const ptyProcess = pty.spawn(shell, args, {
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
         cwd: workingDir,
-        env: {
-            ...process.env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-            ...extraEnv
-        }
+        env: childEnv
     });
 
     // Forward PTY output to the renderer
@@ -96,7 +116,7 @@ function startTerminal(cwd, command, onData, onExit) {
         } catch (_) { }
     });
 
-    terminals.set(id, { ptyProcess, onData, onExit });
+    terminals.set(id, { ptyProcess, onData, onExit, ownerId });
 
     return id;
 }
@@ -155,6 +175,30 @@ function killTerminal(id) {
 }
 
 /**
+ * Number of currently active terminal instances (optionally only those owned
+ * by one window).
+ * @param {number} [ownerId] - webContents id; omit to count every terminal
+ * @returns {number}
+ */
+function count(ownerId) {
+    if (ownerId === undefined) return terminals.size;
+    let n = 0;
+    for (const entry of terminals.values()) if (entry.ownerId === ownerId) n++;
+    return n;
+}
+
+/**
+ * Kill every terminal owned by one window (on reload or close its renderer
+ * loses the panes, so the PTYs would otherwise keep running unseen).
+ * @param {number} ownerId - webContents id
+ */
+function killByOwner(ownerId) {
+    for (const [id, entry] of terminals.entries()) {
+        if (entry.ownerId === ownerId) killTerminal(id);
+    }
+}
+
+/**
  * Kill all active terminal instances (called on app quit).
  */
 function killAll() {
@@ -189,5 +233,7 @@ module.exports = {
     writeToTerminal,
     resizeTerminal,
     killTerminal,
+    count,
+    killByOwner,
     killAll
 };

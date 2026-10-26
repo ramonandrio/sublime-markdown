@@ -47,6 +47,8 @@ async function createWindow(initialDir) {
         // Note: webContents is already destroyed at this point, use the saved id
         serverInstance.close();
         windowData.delete(webContentsId);
+        // Sus terminales quedarían huérfanos (nadie puede volver a verlos).
+        try { require('./terminal-manager').killByOwner(webContentsId); } catch (_) {}
     });
 
     // Bloquear DevTools en producción también por atajo de teclado
@@ -114,6 +116,17 @@ function setupMenu() {
                     accelerator: 'CmdOrCtrl+N',
                     click: () => createWindow()
                 },
+                { type: 'separator' },
+                {
+                    label: 'Abrir historial de terminales',
+                    click: () => {
+                        try {
+                            const dir = TERM_HISTORY_DIR();
+                            fs.mkdirSync(dir, { recursive: true });
+                            shell.openPath(dir);
+                        } catch (_) {}
+                    }
+                },
                 isMac ? { role: 'close' } : { role: 'quit' }
             ]
         },
@@ -161,7 +174,29 @@ function setupMenu() {
                     label: 'Force Reload',
                     accelerator: 'CmdOrCtrl+Shift+R',
                     click: (_, focusedWindow) => {
-                        if (focusedWindow) focusedWindow.reload();
+                        if (!focusedWindow) return;
+                        // Una recarga completa destruye todos los panes de terminal.
+                        // Es fácil pulsar Cmd+Shift+R creyendo estar en Chrome, así que
+                        // si hay terminales vivos pedimos confirmación antes de recargar.
+                        // Sólo cuentan los terminales de ESTA ventana.
+                        const ownerId = focusedWindow.webContents.id;
+                        let liveTerms = 0;
+                        try { liveTerms = require('./terminal-manager').count(ownerId); } catch (_) {}
+                        if (liveTerms > 0) {
+                            const choice = dialog.showMessageBoxSync(focusedWindow, {
+                                type: 'warning',
+                                buttons: ['Cancelar', 'Recargar de todos modos'],
+                                defaultId: 0,
+                                cancelId: 0,
+                                message: 'Recarga completa',
+                                detail: `Hay ${liveTerms} terminal(es) abierto(s). Una recarga completa los cerrará y perderás las sesiones en marcha.\n\n(¿Querías recargar una pestaña de Chrome en vez de CompassAI?)`,
+                            });
+                            if (choice === 0) return; // Cancelar
+                        }
+                        // Tras recargar, el renderer ya no ve esos PTYs: cerrarlos de
+                        // verdad en vez de dejarlos vivos y huérfanos.
+                        try { require('./terminal-manager').killByOwner(ownerId); } catch (_) {}
+                        focusedWindow.reload();
                     }
                 },
                 ...(!app.isPackaged ? [{ role: 'toggleDevTools' }] : []),
@@ -307,7 +342,8 @@ ipcMain.handle('terminal-start', async (event, { cwd, command }) => {
                 if (targetWindow && !targetWindow.isDestroyed()) {
                     targetWindow.webContents.send('terminal-exit', { id, code });
                 }
-            }
+            },
+            senderId
         );
         log('[BACKEND] Terminal iniciada con éxito. ID:', id);
         return { ok: true, id };
@@ -409,76 +445,59 @@ ipcMain.on('set-window-title', (event, data) => {
     }
 });
 
-// ---- Coda API proxy (avoids CORS from renderer) ----
-const HTTPS_TIMEOUT_MS = 10000; // 10 s máximo para cualquier request a APIs externas
+// ---- Terminal scrollback history (crash/close recovery) ----
+// Persiste el texto plano visible de cada pane de terminal en userData, para
+// que un cierre accidental de pane o de la app no se lleve el output por
+// delante. NO son los transcripts de Claude Code (esos los gestiona su CLI):
+// esto es el buffer tal cual se ve en pantalla, legible en el propio visor.
+const TERM_HISTORY_DIR = () => path.join(app.getPath('userData'), 'terminal-history');
+const TERM_HISTORY_MAX_FILES = 60; // conservar los N logs más recientes
 
-ipcMain.handle('coda-api-request', async (event, { path: apiPath, apiKey }) => {
-    const https = require('https');
-    return new Promise((resolve) => {
-        const options = {
-            hostname: 'coda.io',
-            path: `/apis/v1${apiPath}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Accept': 'application/json'
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
-                } catch {
-                    resolve({ ok: false, status: res.statusCode, data: null });
-                }
-            });
-        });
-        req.setTimeout(HTTPS_TIMEOUT_MS, () => {
-            req.destroy();
-            resolve({ ok: false, error: 'timeout', data: null });
-        });
-        req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
-        req.end();
-    });
+function pruneTerminalHistory() {
+    try {
+        const dir = TERM_HISTORY_DIR();
+        if (!fs.existsSync(dir)) return;
+        const files = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.log'))
+            .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+            .sort((a, b) => b.m - a.m);
+        for (const { f } of files.slice(TERM_HISTORY_MAX_FILES)) {
+            try { fs.unlinkSync(path.join(dir, f)); } catch (_) {}
+        }
+    } catch (err) { warn('[term-history] prune falló:', err.message); }
+}
+
+ipcMain.handle('terminal-history-save', async (event, { id, title, profile, cwd, text } = {}) => {
+    if (typeof id !== 'string' || !id || typeof text !== 'string') return false;
+    // Sanea el id para usarlo como nombre de fichero (uuid, pero por si acaso).
+    const safeId = id.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128);
+    try {
+        const dir = TERM_HISTORY_DIR();
+        await fs.promises.mkdir(dir, { recursive: true });
+        const header =
+            `# Terminal: ${title || profile || 'terminal'}\n` +
+            `# Perfil: ${profile || '?'}  ·  cwd: ${cwd || '?'}\n` +
+            `# Guardado: ${new Date().toISOString()}  ·  id: ${id}\n` +
+            `${'─'.repeat(60)}\n`;
+        // Asíncrono: no bloquear el proceso principal (IPC/PTY) con varios MB.
+        await fs.promises.writeFile(path.join(dir, `${safeId}.log`), header + text, { encoding: 'utf8', mode: 0o600 });
+        return true;
+    } catch (err) {
+        warn('[term-history] no se pudo guardar:', err.message);
+        return false;
+    }
 });
 
-// ---- Notion API proxy (avoids CORS from renderer) ----
-ipcMain.handle('notion-api-request', async (event, { path: apiPath, method = 'GET', body = null, apiKey }) => {
-    const https = require('https');
-    return new Promise((resolve) => {
-        const options = {
-            hostname: 'api.notion.com',
-            path: `/v1${apiPath}`,
-            method: method,
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Notion-Version': '2022-06-28',
-                'Content-Type': 'application/json'
-            }
-        };
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                try {
-                    resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data: JSON.parse(data) });
-                } catch {
-                    resolve({ ok: false, status: res.statusCode, data: null });
-                }
-            });
-        });
-        req.setTimeout(HTTPS_TIMEOUT_MS, () => {
-            req.destroy();
-            resolve({ ok: false, error: 'timeout', data: null });
-        });
-        req.on('error', (err) => resolve({ ok: false, error: err.message, data: null }));
-        if (body) {
-            req.write(JSON.stringify(body));
-        }
-        req.end();
-    });
+ipcMain.handle('terminal-history-reveal', () => {
+    try {
+        const dir = TERM_HISTORY_DIR();
+        fs.mkdirSync(dir, { recursive: true });
+        shell.openPath(dir);
+        return dir;
+    } catch (err) {
+        warn('[term-history] no se pudo abrir la carpeta:', err.message);
+        return null;
+    }
 });
 
 // ---- Ollama API proxy (localhost or remote) ----
@@ -594,6 +613,7 @@ ipcMain.handle('proto-server-stop', async (event, folderPath) => {
 
 app.whenReady().then(async () => {
     setupMenu();
+    pruneTerminalHistory(); // limpiar logs de terminal antiguos al arrancar
     // Start with a generic directory. The frontend will override this via API per window.
     process.env.PMOS_ROOT_DIR = path.resolve(__dirname, '..');
 

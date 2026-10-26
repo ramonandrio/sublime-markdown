@@ -4,6 +4,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy: scripts solo desde 'self' (locales) y el CDN de
+         highlight.js (con SRI). 'unsafe-inline' se limita a estilos por los
+         inline-styles del propio HTML; NO se permite en scripts. blob: habilita
+         los previews de HTML en iframes aislados. -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' https://cdnjs.cloudflare.com;
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' https://fonts.gstatic.com;
+        img-src 'self' data: blob:;
+        connect-src 'self';
+        frame-src 'self' blob: https:;
+        object-src 'none';
+        base-uri 'self';
+    ">
     <title>CompassAI</title>
     <link rel="icon" type="image/png" href="/icon.png">
 
@@ -14,8 +29,8 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
 
-    <!-- Tema de resaltado de código estilo GitHub Claro -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <!-- Tema de resaltado de código estilo GitHub Claro (servido localmente) -->
+    <link rel="stylesheet" href="node_modules/highlight.js/styles/github.min.css">
 
     <!-- Xterm CSS -->
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
@@ -52,7 +67,7 @@
     <!-- App principal (oculta hasta elegir fuente) -->
     <div class="app-container" id="appContainer" style="display: none;">
         <!-- Botón hamburguesa para móvil -->
-        <button id="mobileMenuBtn" class="mobile-menu-btn" title="Menú">
+        <button id="mobileMenuBtn" class="mobile-menu-btn" title="Menú" aria-label="Abrir menú">
             <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16">
                 </path>
@@ -86,7 +101,7 @@
                             </path>
                         </svg>
                     </button>
-                    <button id="settingsBtn" class="action-btn" title="Ajustes">
+                    <button id="settingsBtn" class="action-btn" title="Ajustes" aria-label="Ajustes">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/>
                         </svg>
@@ -105,43 +120,6 @@
                 </div>
             </div>
 
-            <!-- Resizer horizontal para separar archivos y Coda -->
-            <div id="codaResizer" class="sidebar-horizontal-resizer" style="display: none;"></div>
-
-            <!-- Coda Pages Section -->
-            <div class="coda-section" id="codaSection" style="display: none;">
-                <div class="coda-section-header">
-                    <span class="coda-section-title">
-                        CODA
-                    </span>
-                    <button id="refreshCodaBtn" class="refresh-section-btn" title="Refrescar árbol de Coda">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path d="M23 4v6h-6M1 20v-6h6"/>
-                            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-                        </svg>
-                    </button>
-                </div>
-                <!-- API Tree will be injected here -->
-            </div>
-
-            <!-- Resizer horizontal para separar Coda y Notion -->
-            <div id="notionResizer" class="sidebar-horizontal-resizer" style="display: none;"></div>
-
-            <!-- Notion Pages Section -->
-            <div class="notion-section coda-section" id="notionSection" style="display: none;">
-                <div class="notion-section-header coda-section-header">
-                    <span class="notion-section-title coda-section-title">
-                        Notion
-                    </span>
-                    <button id="refreshNotionBtn" class="refresh-section-btn" title="Refrescar árbol de Notion">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path d="M23 4v6h-6M1 20v-6h6"/>
-                            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-                        </svg>
-                    </button>
-                </div>
-                <!-- API Tree will be injected here -->
-            </div>
         </aside>
 
         <!-- Resizer para el Sidebar -->
@@ -201,6 +179,15 @@
                             </svg>
                         </button>
                     </div>
+                    <button id="jsonViewToggle" class="action-btn" title="Alternar vista (Árbol / Formateado)"
+                        style="padding: 6px 12px; font-weight: 500; display: none;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            style="margin-right: 4px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        <span id="jsonViewToggleLabel">Árbol</span>
+                    </button>
                     <button id="openHtmlBtn" class="action-btn" title="Abrir en Nueva Pestaña"
                         style="padding: 6px 12px; font-weight: 500; display: none;">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
@@ -247,7 +234,7 @@
                 <!-- Divider arrastrable entre editor y preview -->
                 <div id="editorResizer" class="split-divider" style="display: none;"></div>
 
-                <!-- Panel de Coda (webview, oculto por defecto) -->
+                <!-- Panel webview para prototipos (oculto por defecto) -->
                 <div id="codaPanel" style="display:none; width: 100%; height: 100%; flex: 1 1 auto; overflow: hidden;">
                     <webview id="codaFrame" src="about:blank" partition="persist:coda" allowpopups style="width: 100%; height: 100%; display: flex; border: none;"></webview>
                 </div>
@@ -258,11 +245,11 @@
 
                     <!-- Find Bar (Cmd+F) -->
                     <div id="findBar" style="display:none;">
-                        <input id="findInput" type="text" placeholder="Buscar..." autocomplete="off" spellcheck="false" />
+                        <input id="findInput" type="text" placeholder="Buscar..." autocomplete="off" spellcheck="false" aria-label="Buscar en el documento" />
                         <span id="findCount"></span>
-                        <button id="findPrev" title="Anterior (Shift+Enter)">↑</button>
-                        <button id="findNext" title="Siguiente (Enter)">↓</button>
-                        <button id="findClose" title="Cerrar (Esc)">✕</button>
+                        <button id="findPrev" title="Anterior (Shift+Enter)" aria-label="Resultado anterior">↑</button>
+                        <button id="findNext" title="Siguiente (Enter)" aria-label="Resultado siguiente">↓</button>
+                        <button id="findClose" title="Cerrar (Esc)" aria-label="Cerrar búsqueda">✕</button>
                     </div>
 
                     <div id="markdownContent" class="markdown-body">
@@ -279,7 +266,7 @@
 
                 <!-- Panel de Split View (Oculto por defecto) -->
                 <div id="splitPanel" class="split-panel" style="display: none;">
-                    <button id="splitPanelClose" class="split-panel-close" title="Cerrar panel dividido">✕</button>
+                    <button id="splitPanelClose" class="split-panel-close" title="Cerrar panel dividido" aria-label="Cerrar panel dividido">✕</button>
                     <div class="split-panel-content">
                         <div id="splitMarkdownContent" class="markdown-body"></div>
                     </div>
@@ -374,14 +361,14 @@
     </div>
 
     <!-- Modal de Búsqueda Global (Cmd+P) -->
-    <div id="searchModal" class="search-modal" style="display: none;">
+    <div id="searchModal" class="search-modal" style="display: none;" role="dialog" aria-modal="true" aria-label="Buscar archivos">
         <div class="search-modal-content">
             <div class="search-input-wrapper">
-                <svg class="search-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="search-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                 </svg>
-                <input type="text" id="searchInput" class="search-input"
+                <input type="text" id="searchInput" class="search-input" aria-label="Buscar archivos por nombre o contenido"
                     placeholder="Buscar archivos por nombre o contenido (Cmd+P)..." autocomplete="off"
                     spellcheck="false">
                 <div class="search-spinner" id="searchSpinner" style="display: none;"></div>
@@ -398,7 +385,7 @@
     </div>
 
     <!-- Custom Prompt Modal -->
-    <div id="customPromptModal" class="search-modal" style="display: none; z-index: 10000;">
+    <div id="customPromptModal" class="search-modal" style="display: none; z-index: 10000;" role="dialog" aria-modal="true" aria-labelledby="customPromptTitle">
         <div class="search-modal-content" style="max-width: 400px; padding: 20px; text-align: left;">
             <h3 id="customPromptTitle" style="margin-top: 0; color: var(--text-color);"></h3>
             <input type="text" id="customPromptInput" class="search-input"
@@ -412,10 +399,16 @@
         </div>
     </div>
 
-    <!-- Librerías Externas vía CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- marked y DOMPurify servidos localmente desde node_modules: evita el
+         riesgo de supply-chain de cargar el sanitizador desde un CDN y permite
+         una CSP estricta sin host externos para scripts. -->
+    <script src="node_modules/marked/lib/marked.umd.js"></script>
+    <script src="node_modules/dompurify/dist/purify.min.js"></script>
+    <!-- highlight.js no trae bundle de navegador en su paquete npm; se mantiene
+         vía CDN con versión fijada + SRI para verificar la integridad. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+            integrity="sha384-F/bZzf7p3Joyp5psL90p/p89AZJsndkSoGwRpXcZhleCWhd8SnRuoYo4d0yirjJp"
+            crossorigin="anonymous"></script>
 
     <!-- xterm + addons: UMD copia exports a window (Terminal, FitAddon, ...) -->
     <script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
@@ -428,67 +421,17 @@
     <script src="app.js?v=15"></script>
 
     <!-- Settings Modal -->
-    <div id="settingsModal" class="settings-overlay" style="display:none;">
+    <div id="settingsModal" class="settings-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <div class="settings-modal">
             <div class="settings-header">
-                <h2>
-                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                <h2 id="settingsTitle">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
                     Ajustes
                 </h2>
-                <button id="settingsCloseBtn" class="settings-close-btn">✕</button>
+                <button id="settingsCloseBtn" class="settings-close-btn" aria-label="Cerrar ajustes">✕</button>
             </div>
 
             <div class="settings-body">
-                <!-- Coda Integration -->
-                <section class="settings-section">
-                    <div class="settings-section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
-                        Integración con Coda
-                    </div>
-                    <div class="settings-field">
-                        <label for="codaApiKeyInput">API Key de Coda</label>
-                        <p class="settings-hint">
-                            Genera tu API Key en <a href="https://coda.io/account" target="_blank">coda.io/account</a> → sección "API". Los documentos se cargarán de forma privada sin necesidad de publicarlos.
-                        </p>
-                        <div class="settings-input-row">
-                            <input id="codaApiKeyInput" type="password" placeholder="••••••••••••••••••••••••••••" autocomplete="off" spellcheck="false" />
-                            <button id="codaApiKeyToggle" class="settings-icon-btn" title="Mostrar/ocultar">
-                                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                            </button>
-                        </div>
-                        <div class="settings-actions">
-                            <button id="codaApiKeySave" class="settings-btn-primary">Guardar y conectar</button>
-                            <button id="codaApiKeyRemove" class="settings-btn-danger" style="display:none;">Desconectar</button>
-                            <span id="codaApiKeyStatus" class="settings-status"></span>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Notion Integration -->
-                <section class="settings-section">
-                    <div class="settings-section-title">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M9 8l6 8"/></svg>
-                        Integración con Notion
-                    </div>
-                    <div class="settings-field">
-                        <label for="notionApiKeyInput">API Key de Notion</label>
-                        <p class="settings-hint">
-                            Crea una integración en <a href="https://www.notion.so/my-integrations" target="_blank">notion.so/my-integrations</a> y copia el "Internal Integration Secret". Recuerda que debes compartir tus páginas con la integración desde Notion para que aparezcan aquí.
-                        </p>
-                        <div class="settings-input-row">
-                            <input id="notionApiKeyInput" type="password" placeholder="secret_••••••••••••••••••••••••" autocomplete="off" spellcheck="false" />
-                            <button id="notionApiKeyToggle" class="settings-icon-btn" title="Mostrar/ocultar">
-                                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                            </button>
-                        </div>
-                        <div class="settings-actions">
-                            <button id="notionApiKeySave" class="settings-btn-primary">Guardar y conectar</button>
-                            <button id="notionApiKeyRemove" class="settings-btn-danger" style="display:none;">Desconectar</button>
-                            <span id="notionApiKeyStatus" class="settings-status"></span>
-                        </div>
-                    </div>
-                </section>
-
                 <!-- Modelo local (Ollama) -->
                 <section class="settings-section">
                     <div class="settings-section-title">
@@ -516,6 +459,52 @@
                             <button id="llmSaveBtn" class="settings-btn-primary">Guardar</button>
                             <button id="llmForgetBtn" class="settings-btn-danger" style="display:none;">Olvidar</button>
                             <span id="llmStatus" class="settings-status"></span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-section">
+                    <div class="settings-section-title">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6 4.5 2.3 7.1-6.3-4.6L5.7 21l2.3-7.1-6-4.5h7.6z"/></svg>
+                        Claude Code
+                    </div>
+                    <div class="settings-field">
+                        <label class="settings-checkbox" for="claudeSkipPermsToggle" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                            <input id="claudeSkipPermsToggle" type="checkbox" style="margin-top:3px;" />
+                            <span>
+                                Saltar confirmaciones de permisos
+                                (<code>--dangerously-skip-permissions</code>)
+                            </span>
+                        </label>
+                        <p class="settings-hint">
+                            ⚠️ Si lo activas, Claude Code ejecutará comandos y editará archivos
+                            <strong>sin pedirte confirmación</strong>. Úsalo solo en carpetas de confianza.
+                            Desactivado por defecto.
+                        </p>
+                        <span id="claudeSkipPermsStatus" class="settings-status"></span>
+                    </div>
+                    <div class="settings-field">
+                        <label for="claudeModelsInput">Modelos disponibles</label>
+                        <p class="settings-hint">
+                            Separados por comas, formato <code>Etiqueta=modelo</code> (o solo
+                            <code>modelo</code>). La etiqueta se muestra bajo "Claude" al lanzar un
+                            terminal (click derecho en <code>&gt;_</code>) y el valor se pasa al CLI
+                            como <code>--model</code>. Los alias <code>opus/sonnet/haiku</code>
+                            resuelven a los últimos; usa el id completo para variantes
+                            (p.ej. <code>claude-opus-4-8[1m]</code> para 1M de contexto).
+                        </p>
+                        <div class="settings-input-row">
+                            <input id="claudeModelsInput" type="text" placeholder="Opus 4.8=opus, Fable 5=claude-fable-5, Sonnet 4.6=sonnet" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <label for="claudeDefaultModelSelect" style="margin-top:10px;">Modelo por defecto (★)</label>
+                        <div class="settings-input-row">
+                            <select id="claudeDefaultModelSelect">
+                                <option value="">— del CLI —</option>
+                            </select>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="claudeModelsSave" class="settings-btn-primary">Guardar</button>
+                            <span id="claudeModelsStatus" class="settings-status"></span>
                         </div>
                     </div>
                 </section>

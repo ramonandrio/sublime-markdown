@@ -9,6 +9,17 @@
  *   Ctrl+Shift+W  →  cerrar panel activo
  */
 
+// Escapa texto para interpolarlo de forma segura dentro de innerHTML.
+// Úsalo con nombres de fichero/documento, que pueden contener < > " '.
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 let Terminal, FitAddon, WebglAddon, WebLinksAddon;
 
 function loadTerminalLibs() {
@@ -32,12 +43,17 @@ const IDLE_MS = 8000;
 // Threshold para notificar la finalización de comandos shell (vía OSC 633 D).
 const COMMAND_DURATION_THRESHOLD_MS = 5000;
 
+// Persistencia de scrollback: máximo de líneas (buffer + histórico) a volcar
+// por pane, y cada cuánto se autoguarda mientras el pane está vivo.
+const HISTORY_MAX_LINES = 5000;
+const HISTORY_AUTOSAVE_MS = 10_000;
+
 // Perfiles de arranque para terminales
 // Ollama, Aider y OpenCode resuelven su comando dinámicamente desde
 // la config guardada en IndexedDB (endpoint + modelo), de ahí command: null.
 const PANE_PROFILES = [
     { id: 'terminal', label: 'Terminal',  icon: '>', command: null },
-    { id: 'claude',   label: 'Claude',    icon: '✦', command: '$HOME/.local/bin/claude --dangerously-skip-permissions' },
+    { id: 'claude',   label: 'Claude',    icon: '✦', command: '$HOME/.local/bin/claude' },
     { id: 'gemini',   label: 'Gemini',    icon: '◆', command: 'gemini' },
     { id: 'openai',   label: 'ChatGPT',   icon: '●', command: 'chatgpt' },
     { id: 'aider',    label: 'Aider',     icon: '⚒', command: null, dynamic: true },
@@ -79,6 +95,45 @@ function loadLlmSettings() {
             resolve({ endpoint: null, model: null });
         }
     });
+}
+
+// Lee un valor simple del store 'settings' de IndexedDB (no secretos).
+function loadSetting(key) {
+    return new Promise((resolve) => {
+        try {
+            const req = indexedDB.open('MarkdownViewerDB', 3);
+            req.onerror = () => resolve(null);
+            req.onsuccess = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains('settings')) { db.close(); return resolve(null); }
+                const tx = db.transaction('settings', 'readonly');
+                const r = tx.objectStore('settings').get(key);
+                r.onsuccess = () => { const v = r.result?.value ?? null; db.close(); resolve(v); };
+                r.onerror   = () => { db.close(); resolve(null); };
+            };
+        } catch { resolve(null); }
+    });
+}
+
+// Modelos de Claude configurables (editables en Ajustes). Formato de cada
+// entrada: "Etiqueta=modelo" (o solo "modelo", que sirve de etiqueta y valor).
+// La etiqueta se muestra en el menú; el valor se pasa al CLI como --model.
+// Default: los modelos reales de Anthropic (los alias opus/sonnet/haiku
+// resuelven a los últimos; Fable y las variantes 1M usan el id completo).
+const CLAUDE_DEFAULT_MODELS_STR =
+    'Opus 5.5=claude-opus-5-5, Opus 4.8=opus, Opus 4.8 (1M)=claude-opus-4-8[1m], ' +
+    'Fable 5.1=claude-fable-5-1, Fable 5=claude-fable-5, ' +
+    'Sonnet 4.6=sonnet, Sonnet 4.6 (1M)=claude-sonnet-4-6[1m], Haiku 4.5=haiku';
+
+// Devuelve [{ label, value }]. Trocea por comas/saltos, hace trim y descarta
+// vacíos. Si no hay nada guardado, usa la lista real por defecto.
+function parseClaudeModels(raw) {
+    const source = (raw && typeof raw === 'string' && raw.trim()) ? raw : CLAUDE_DEFAULT_MODELS_STR;
+    return source.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(entry => {
+        const eq = entry.indexOf('=');
+        if (eq === -1) return { label: entry, value: entry };
+        return { label: entry.slice(0, eq).trim(), value: entry.slice(eq + 1).trim() };
+    }).filter(m => m.value);
 }
 
 // Escape conservador para nombres de modelo (sólo caracteres seguros).
@@ -258,6 +313,7 @@ class TerminalController {
                 // Aider + Ollama se renderizan dinámicamente al abrir el
                 // dropdown (lazy fetch de /api/tags con caché de 60 s, lee
                 // la config Ollama de IndexedDB para decidir habilitado/no).
+                let claudeSection = null;
                 for (const profile of PANE_PROFILES) {
                     if (profile.dynamic) continue;
                     const item = document.createElement('button');
@@ -269,6 +325,11 @@ class TerminalController {
                         this.createTab({ profile: profile.id });
                     });
                     newTabDropdown.appendChild(item);
+                    if (profile.id === 'claude') {
+                        claudeSection = document.createElement('div');
+                        claudeSection.className = 'pane-profile-claude-section';
+                        newTabDropdown.appendChild(claudeSection);
+                    }
                 }
                 // Contenedor para los items dinámicos (Aider + Ollama)
                 const dynamicProfilesSection = document.createElement('div');
@@ -284,7 +345,14 @@ class TerminalController {
                     });
                     const willOpen = !newTabDropdown.classList.contains('open');
                     if (willOpen) {
-                        // Render items dinámicos antes de abrir (la posición depende del scrollHeight)
+                        // Render items (Claude por modelo + dinámicos) antes de
+                        // abrir: la posición depende del scrollHeight resultante.
+                        if (claudeSection) {
+                            await this.renderClaudeModelItems(claudeSection, (opts) => {
+                                newTabDropdown.classList.remove('open');
+                                this.createTab(opts);
+                            });
+                        }
                         await this._renderDynamicProfileItems(dynamicProfilesSection, (opts) => {
                             newTabDropdown.classList.remove('open');
                             this.createTab(opts);
@@ -341,9 +409,12 @@ class TerminalController {
             // antes de escribir. El wrap con ESC[?2026h/l hace el render atómico en xterm.js v6.
             if (pane._writeTimer) clearTimeout(pane._writeTimer);
             pane._writeTimer = setTimeout(() => {
+                pane._writeTimer = null;
+                // El pane puede haberse cerrado en estos 16 ms: no escribir
+                // sobre un xterm ya disposed.
+                if (pane._disposed) return;
                 const buf = pane._writeBuf;
                 pane._writeBuf = '';
-                pane._writeTimer = null;
                 pane.term.write('\x1b[?2026h' + buf + '\x1b[?2026l');
             }, 16);
 
@@ -354,18 +425,55 @@ class TerminalController {
             // de Claude esperando input) no deben re-disparar la notificación.
             // Sólo el input del usuario (onData) o el cierre del pane lo limpian.
             pane._hadOutputEver = true;
+            pane._historyDirty = true; // hay output nuevo desde el último snapshot
 
             if (pane._idleTimer) clearTimeout(pane._idleTimer);
             pane._idleTimer = setTimeout(() => this._onPaneIdle(id), IDLE_MS);
         });
 
-        this.api.onTerminalExit(({ id }) => {
-            // El PTY terminó inesperadamente
-            if (this.panes.has(id)) this.closePane(id);
+        this.api.onTerminalExit(({ id, code }) => {
+            // El PTY terminó: NO destruir el pane al instante (perdería todo el
+            // scrollback). Lo marcamos como "exited" y dejamos el buffer visible.
+            const pane = this.panes.get(id);
+            if (pane && !pane._exited) this._markPaneExited(pane, code);
         });
 
         // Click en la notificación nativa → enfocamos el pane que la disparó
         this.api.onFocusPane?.(({ paneId }) => this._focusPane(paneId));
+
+        // Autosave periódico del scrollback de todos los panes vivos, para que
+        // un crash o un cierre accidental no se lleve el output por delante.
+        if (this.api.terminalHistorySave && !this._historyTimer) {
+            this._historyTimer = setInterval(() => this._snapshotAllPanes(), HISTORY_AUTOSAVE_MS);
+            // Volcado final al cerrar la ventana (quit / recarga).
+            window.addEventListener('beforeunload', () => this._snapshotAllPanes());
+        }
+    }
+
+    // ── El PTY terminó: marcar el pane como "exited" sin destruirlo ───────────
+    // Conserva el buffer/scrollback para que el usuario lea el output final.
+    // El pane se cierra manualmente (botón × o Ctrl+Shift+W) vía closePane.
+    _markPaneExited(pane, code) {
+        pane._exited = true;
+        if (pane._idleTimer) { clearTimeout(pane._idleTimer); pane._idleTimer = null; }
+        // Volcar cualquier output aún pendiente en el debounce antes del aviso.
+        if (pane._writeTimer) {
+            clearTimeout(pane._writeTimer);
+            pane._writeTimer = null;
+            if (!pane._disposed && pane._writeBuf) {
+                pane.term.write('\x1b[?2026h' + pane._writeBuf + '\x1b[?2026l');
+                pane._writeBuf = '';
+            }
+        }
+        if (!pane._disposed) {
+            const label = (typeof code === 'number' && code !== 0)
+                ? `proceso finalizado (código ${code})`
+                : 'proceso finalizado';
+            // Línea atenuada al final del buffer (sin borrar lo anterior).
+            pane.term.write(`\r\n\x1b[2m── ${label} · Ctrl+Shift+W para cerrar ──\x1b[0m\r\n`);
+        }
+        // Indicador visual en la pestaña.
+        this.tabs.get(pane.tabId)?.tabBtn.classList.add('pane-exited');
     }
 
     // ── Idle detector: la pestaña no ha recibido output en IDLE_MS ────────────
@@ -538,7 +646,7 @@ class TerminalController {
         const tabBtn = document.createElement('div');
         tabBtn.className = 'terminal-tab';
         tabBtn.dataset.tabId = tabId;
-        tabBtn.innerHTML = `<span class="terminal-tab-name">${label}</span><div class="terminal-tab-close">×</div>`;
+        tabBtn.innerHTML = `<span class="terminal-tab-name">${escapeHtml(label)}</span><div class="terminal-tab-close">×</div>`;
 
         let clickTimer = null;
         tabBtn.addEventListener('click', (e) => {
@@ -653,6 +761,10 @@ class TerminalController {
         const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) { this.closeTab(tabId); return; }
 
+        // La pestaña pudo cerrarse mientras se resolvía el IPC: si ya no existe,
+        // matar el PTY recién creado en vez de montar un terminal zombi sin UI.
+        if (!this.tabs.has(tabId)) { this.api?.terminalKill(ptyRes.id); return; }
+
         // Crear nodo hoja y montarlo
         const leafNode = this._makeLeafNode(ptyRes.id, tabId, options);
         tab.rootNode = leafNode;
@@ -665,7 +777,7 @@ class TerminalController {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model });
         }));
     }
 
@@ -682,7 +794,7 @@ class TerminalController {
         const header = document.createElement('div');
         header.className = 'pane-header';
         header.innerHTML = `
-            <span class="pane-title">${options.fileName || 'Terminal'}</span>
+            <span class="pane-title">${escapeHtml(options.fileName || 'Terminal')}</span>
             <div class="pane-header-actions">
                 <div class="pane-theme-picker">
                     <button class="pane-btn pane-theme-btn" title="Tema del pane">
@@ -711,6 +823,13 @@ class TerminalController {
                     </button>
                     <div class="pane-profile-dropdown"></div>
                 </div>
+                <button class="pane-btn pane-remote-btn" title="Activar Remote Control en esta sesión de Claude (envía /remote-control)">
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.3">
+                        <circle cx="5.5" cy="5.5" r="1.3" fill="currentColor" stroke="none"/>
+                        <path d="M3 3 A3.5 3.5 0 0 0 3 8"/>
+                        <path d="M8 3 A3.5 3.5 0 0 1 8 8"/>
+                    </svg>
+                </button>
                 <button class="pane-btn pane-close-btn" title="Cerrar pane (Ctrl+Shift+W)">×</button>
             </div>`;
 
@@ -981,9 +1100,24 @@ class TerminalController {
 
         // Doble click en el título → renombrar pane
         const titleEl = header.querySelector('.pane-title');
+        titleEl.title = 'Doble clic para renombrar';
         titleEl.addEventListener('dblclick', (e) => {
             e.stopPropagation();
-            this._renamePaneTitle(titleEl);
+            this._renamePaneTitle(titleEl, ptyId);
+        });
+
+        // Botón Remote Control → activa RC en una sesión de Claude ya en marcha
+        // enviando el slash command /remote-control. (Para arrancar YA con RC,
+        // usar el toggle del submenú de Claude al abrir el pane.)
+        // Sólo tiene sentido en panes de Claude: en una shell o en otro CLI el
+        // slash command no existe.
+        const remoteBtn = header.querySelector('.pane-remote-btn');
+        if (remoteBtn && (options.profile || 'terminal') !== 'claude') remoteBtn.style.display = 'none';
+        remoteBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.panes.get(ptyId)?._exited) return; // el proceso ya terminó
+            this._setActiveLeaf(tabId, ptyId);
+            this.api?.terminalInput(ptyId, '/remote-control\n');
         });
 
         // Botones de split con selector de perfil
@@ -994,6 +1128,7 @@ class TerminalController {
 
             // Items fijos (Terminal/Claude/Gemini/ChatGPT). Aider y Ollama
             // se renderizan dinámicamente en cada apertura del contextmenu.
+            let claudeSection = null;
             for (const profile of PANE_PROFILES) {
                 if (profile.dynamic) continue;
                 const item = document.createElement('button');
@@ -1005,6 +1140,11 @@ class TerminalController {
                     this.splitPane(ptyId, dir, { profile: profile.id });
                 });
                 dropdown.appendChild(item);
+                if (profile.id === 'claude') {
+                    claudeSection = document.createElement('div');
+                    claudeSection.className = 'pane-profile-claude-section';
+                    dropdown.appendChild(claudeSection);
+                }
             }
             const dynamicSection = document.createElement('div');
             dynamicSection.className = 'pane-profile-dynamic-section';
@@ -1024,6 +1164,12 @@ class TerminalController {
                 });
                 const willOpen = !dropdown.classList.contains('open');
                 if (willOpen) {
+                    if (claudeSection) {
+                        await this.renderClaudeModelItems(claudeSection, (opts) => {
+                            dropdown.classList.remove('open');
+                            this.splitPane(ptyId, dir, opts);
+                        });
+                    }
                     await this._renderDynamicProfileItems(dynamicSection, (opts) => {
                         dropdown.classList.remove('open');
                         this.splitPane(ptyId, dir, opts);
@@ -1274,7 +1420,35 @@ class TerminalController {
             onClick: () => document.getElementById('settingsBtn')?.click()
         };
 
-        if (profile.id === 'ollama') {
+        if (profile.id === 'claude') {
+            // Modelo: el elegido en el menú (opts.model) tiene prioridad; si no,
+            // el default guardado en Ajustes; si tampoco, se lanza sin --model
+            // (el CLI usa su propio default).
+            const chosenModel = opts.model || await loadSetting('claude_default_model');
+            let cmd = profile.command;
+            if (chosenModel) cmd += ` --model ${shellEscapeArg(chosenModel)}`;
+            // El flag --dangerously-skip-permissions salta TODAS las
+            // confirmaciones de Claude Code: solo se añade si el usuario lo
+            // ha activado explícitamente en Ajustes. Por defecto: desactivado.
+            const skip = await loadSetting('claude_skip_permissions');
+            if (skip === true || skip === 'true') cmd += ' --dangerously-skip-permissions';
+            // Remote Control: si el toggle del submenú está ON, arranca la sesión
+            // controlable desde claude.ai/code y el móvil. Se consume una sola vez.
+            // Le ponemos un --name descriptivo (compass-<modelo>-<hhmm>) para
+            // identificarla; el prefijo del entorno cubre el otro camino (botón).
+            if (this._claudeRemoteControl) {
+                const token = (chosenModel || 'claude')
+                    .replace(/^claude-/, '')
+                    .replace(/\[1m\]/i, '-1m')
+                    .replace(/[^A-Za-z0-9.-]/g, '-');
+                const d = new Date();
+                const hhmm = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+                cmd += ` --remote-control ${shellEscapeArg(`compass-${token}-${hhmm}`)}`;
+                this._claudeRemoteControl = false;
+            }
+            commandToType = cmd;
+            paneLabel = chosenModel ? `Claude (${chosenModel})` : 'Claude';
+        } else if (profile.id === 'ollama') {
             const resolved = await this._resolveOllamaCommand(opts.ollamaModel);
             if (resolved.error) {
                 this._showToast(ptyId, 'Ollama', resolved.error, openSettingsAction);
@@ -1307,7 +1481,7 @@ class TerminalController {
             this.api?.terminalInput(ptyId, commandToType + '\n');
         }, 300);
         const pane = this.panes.get(ptyId);
-        if (pane) {
+        if (pane && !pane._customTitle) {
             const title = pane.leafNode.el.querySelector('.pane-title');
             if (title) title.textContent = paneLabel;
         }
@@ -1484,6 +1658,53 @@ class TerminalController {
         }
     }
 
+    // ── Claude: sub-ítems de modelo (Opus/Sonnet/Haiku…) ─────────────────────
+    // Se renderizan indentados bajo el ítem "Claude" del menú, con el mismo
+    // patrón que los modelos de Ollama. La lista y el default son editables en
+    // Ajustes; se re-renderiza en cada apertura, así los cambios se reflejan ya.
+    async renderClaudeModelItems(containerEl, onSelect) {
+        containerEl.innerHTML = '';
+
+        // Toggle sticky: decide si el próximo Claude arranca con --remote-control.
+        // El estado vive en el controlador y lo lee _execProfile al lanzar.
+        const rcToggle = document.createElement('button');
+        rcToggle.className = 'pane-profile-item pane-profile-subitem';
+        const rcIcon = document.createElement('span');
+        rcIcon.className = 'pane-profile-icon';
+        const paint = () => {
+            const on = !!this._claudeRemoteControl;
+            rcIcon.textContent = on ? '◉' : '◯';
+            rcToggle.lastChild.textContent = `Remote Control  [${on ? 'ON' : 'OFF'}]`;
+        };
+        rcToggle.appendChild(rcIcon);
+        rcToggle.appendChild(document.createTextNode(''));
+        paint();
+        rcToggle.title = 'Si está ON, el próximo Claude arranca con --remote-control (controlable desde claude.ai/code y el móvil)';
+        rcToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._claudeRemoteControl = !this._claudeRemoteControl;
+            paint();
+        });
+        containerEl.appendChild(rcToggle);
+
+        const models = parseClaudeModels(await loadSetting('claude_models'));
+        const def = await loadSetting('claude_default_model');
+        for (const m of models) {
+            const item = document.createElement('button');
+            item.className = 'pane-profile-item pane-profile-subitem';
+            const icon = document.createElement('span');
+            icon.className = 'pane-profile-icon';
+            icon.textContent = '·';
+            item.appendChild(icon);
+            item.appendChild(document.createTextNode(m.label + (m.value === def ? ' ★' : '')));
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onSelect({ profile: 'claude', model: m.value });
+            });
+            containerEl.appendChild(item);
+        }
+    }
+
     // ── Dividir un pane ───────────────────────────────────────────────────────
     async splitPane(ptyId, dir, options = {}) {
         if (!this.api) return;
@@ -1498,7 +1719,14 @@ class TerminalController {
         const ptyRes = await this.api.terminalStart({ cwd: null });
         if (!ptyRes?.ok) return;
 
-        const newLeaf = this._makeLeafNode(ptyRes.id, pane.tabId);
+        // El pane original o su pestaña pudieron cerrarse durante el await:
+        // oldLeaf quedaría detached. Abortar y matar el PTY recién creado.
+        if (!this.panes.has(ptyId) || !this.tabs.has(pane.tabId)) {
+            this.api?.terminalKill(ptyRes.id);
+            return;
+        }
+
+        const newLeaf = this._makeLeafNode(ptyRes.id, pane.tabId, options);
 
         // Construir nodo split
         const splitEl = document.createElement('div');
@@ -1550,8 +1778,28 @@ class TerminalController {
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model });
         }));
+    }
+
+    // ── Limpieza completa de un pane ──────────────────────────────────────────
+    // Idempotente. Cancela los timers (write/idle) para que ninguno escriba
+    // sobre un xterm ya disposed, ejecuta el cleanup de listeners document-level
+    // del theme dropdown, mata el PTY y libera el terminal. Usar SIEMPRE para
+    // destruir un pane — tanto en closePane como en closeTab.
+    _disposePane(pane) {
+        if (!pane || pane._disposed) return;
+        // Volcar el scrollback ANTES de destruir el xterm: cerrar un pane (o su
+        // pestaña) no debe perder el output. Se hace mientras _disposed aún es
+        // false para que _snapshotPane no lo descarte.
+        this._snapshotPane(pane);
+        pane._disposed = true;
+        if (pane._writeTimer) { clearTimeout(pane._writeTimer); pane._writeTimer = null; }
+        if (pane._idleTimer)  { clearTimeout(pane._idleTimer);  pane._idleTimer = null; }
+        if (pane.leafNode?.el?._themeCleanup) pane.leafNode.el._themeCleanup();
+        this.api?.terminalKill(pane.ptyId);
+        try { pane.term.dispose(); } catch (_) { /* ya disposed */ }
+        this.panes.delete(pane.ptyId);
     }
 
     // ── Cerrar un pane ────────────────────────────────────────────────────────
@@ -1559,11 +1807,7 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (!pane) return;
 
-        this.api?.terminalKill(ptyId);
-        pane.term.dispose();
-        // Limpiar listener del theme dropdown
-        if (pane.leafNode.el._themeCleanup) pane.leafNode.el._themeCleanup();
-        this.panes.delete(ptyId);
+        this._disposePane(pane);
 
         const leafNode    = pane.leafNode;
         const parentSplit = leafNode.parent;
@@ -1612,14 +1856,11 @@ class TerminalController {
         const tab = this.tabs.get(tabId);
         if (!tab) return;
 
-        // Matar todos los PTYs de la pestaña
+        // Destruir todos los panes de la pestaña con la limpieza completa
+        // (timers + listeners + PTY + terminal), no solo dispose+delete.
         [...this.panes.values()]
             .filter(p => p.tabId === tabId)
-            .forEach(p => {
-                this.api?.terminalKill(p.ptyId);
-                p.term.dispose();
-                this.panes.delete(p.ptyId);
-            });
+            .forEach(p => this._disposePane(p));
 
         tab.tabBtn.remove();
         tab.containerEl.remove();
@@ -1654,6 +1895,11 @@ class TerminalController {
             setTimeout(() => {
                 this._setActiveLeaf(tabId, leafPtyId);
                 this._fitAllInNode(tab.rootNode);
+                // El renderer WebGL no repinta líneas sin cambios al volver de
+                // display:none, así que el terminal aparece en blanco. Forzar un
+                // refresh completo de cada pane (mismo truco que el cambio de tema)
+                // en un rAF, cuando el layout ya está estabilizado tras el fit.
+                requestAnimationFrame(() => this._refreshAllInNode(tab.rootNode));
                 this.panes.get(leafPtyId)?.term.focus();
             }, 50);
         }
@@ -1789,6 +2035,58 @@ class TerminalController {
         this._walkLeaves(node, (leaf) => this._fitLeaf(leaf, notifyPty));
     }
 
+    // Fuerza el redibujado completo de cada pane. Necesario al reactivar una
+    // pestaña: el renderer WebGL no repinta líneas sin cambios tras un
+    // display:none, dejando el terminal en blanco hasta un refresh explícito.
+    _refreshAllInNode(node) {
+        this._walkLeaves(node, (leaf) => {
+            const pane = this.panes.get(leaf.ptyId);
+            if (!pane) return;
+            try { pane.term.refresh(0, pane.term.rows - 1); } catch (_) {}
+        });
+    }
+
+    // ── Persistencia de scrollback (recuperación tras cierre/crash) ───────────
+    // Vuelca el texto plano visible de un terminal al disco (vía IPC → userData).
+    // Legible tal cual en el visor; independiente de si Claude Code guardó o no
+    // su transcript. Ver también main.js: terminal-history-save.
+    _extractPlainText(term) {
+        const buf = term.buffer?.active;
+        if (!buf) return '';
+        const total = buf.length;
+        const start = Math.max(0, total - HISTORY_MAX_LINES);
+        const lines = [];
+        for (let i = start; i < total; i++) {
+            const line = buf.getLine(i);
+            lines.push(line ? line.translateToString(true) : '');
+        }
+        // Recorta líneas en blanco al final para no guardar padding del viewport.
+        while (lines.length && lines[lines.length - 1] === '') lines.pop();
+        return lines.join('\n');
+    }
+
+    _snapshotPane(pane) {
+        if (!pane || pane._disposed || !this.api?.terminalHistorySave) return;
+        if (!pane._hadOutputEver) return; // nada que guardar aún
+        if (!pane._historyDirty) return;  // sin output nuevo: el último snapshot sigue vigente
+        pane._historyDirty = false;
+        let text;
+        try { text = this._extractPlainText(pane.term); } catch (_) { return; }
+        if (!text) return;
+        const title = pane.leafNode?.el?.querySelector('.pane-title')?.textContent?.trim();
+        this.api.terminalHistorySave({
+            id: pane.ptyId,
+            title: title || pane._profileId || 'Terminal',
+            profile: pane._profileId || 'terminal',
+            cwd: null,
+            text,
+        });
+    }
+
+    _snapshotAllPanes() {
+        for (const pane of this.panes.values()) this._snapshotPane(pane);
+    }
+
     _fitAllVisible(notifyPty = true) {
         if (!this.activeTabId) return;
         const tab = this.tabs.get(this.activeTabId);
@@ -1809,7 +2107,7 @@ class TerminalController {
     }
 
     // ── Renombrar título de un pane (doble click en pane-title) ──────────────
-    _renamePaneTitle(titleEl) {
+    _renamePaneTitle(titleEl, ptyId) {
         const oldName = titleEl.textContent;
 
         titleEl.contentEditable = 'true';
@@ -1826,9 +2124,14 @@ class TerminalController {
             if (titleEl.contentEditable === 'false') return;
             titleEl.contentEditable = 'false';
             titleEl.classList.remove('editing');
-            titleEl.textContent = (save && titleEl.textContent.trim())
+            const name = (save && titleEl.textContent.trim())
                 ? titleEl.textContent.trim()
                 : oldName;
+            titleEl.textContent = name;
+            // Persistir el nombre en el modelo del pane para que el auto-naming
+            // de _execProfile (p. ej. "Claude (claude-fable-5)") no lo pise.
+            const pane = ptyId != null ? this.panes.get(ptyId) : null;
+            if (pane) pane._customTitle = (save && name !== oldName) ? name : pane._customTitle;
             titleEl.onkeydown = null;
             titleEl.onblur    = null;
         };
@@ -1953,7 +2256,7 @@ class TerminalController {
         if (activeDocId && activeDocId !== currentLink) {
             const linkItem = document.createElement('div');
             linkItem.className = 'tab-context-menu-item';
-            linkItem.innerHTML = `${linkSvg} Vincular a "${activeDocName || activeDocId}"`;
+            linkItem.innerHTML = `${linkSvg} Vincular a "${escapeHtml(activeDocName || activeDocId)}"`;
             linkItem.addEventListener('click', () => {
                 document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
                 this._setTerminalLink(tabId, activeDocId);
