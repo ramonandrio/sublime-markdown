@@ -509,7 +509,8 @@ document.addEventListener('DOMContentLoaded', () => {
             currentNodeServer,
             activeTabId,
             expandedFolders: [...expandedFolders],
-            openTabs: openTabs.map(t => ({
+            // Las pestañas virtuales (revisión, historial) se generan al vuelo: no se guardan.
+            openTabs: openTabs.filter(t => !t.isVirtual).map(t => ({
                 id: t.id,
                 name: t.name,
                 path: t.path,
@@ -1608,7 +1609,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const previewPanel = document.getElementById('previewPanel');
 
             // Lógica de botones de la Toolbar
-            if (activeTab.isHtml) {
+            if (activeTab.isVirtual) {
+                // Vista generada por la app (revisión de cambios, historial):
+                // ni editor, ni guardar, ni vista dividida.
+                document.getElementById('toggleSplitBtn').style.display = 'none';
+                saveFileBtn.style.display = 'none';
+                document.getElementById('openHtmlBtn').style.display = 'none';
+                document.getElementById('downloadHtmlBtn').style.display = 'none';
+                document.getElementById('htmlResponsiveToolbar').style.display = 'none';
+                document.getElementById('jsonViewToggle').style.display = 'none';
+                if (isEditorOpen) { isEditorOpen = false; updateEditorVisibility(); }
+                previewPanel.style.padding = '24px 32px';
+                markdownContent.style.maxWidth = 'none';
+                markdownContent.style.height = '';
+                markdownContent.style.flex = '';
+                markdownContent.style.display = '';
+                markdownContent.style.flexDirection = '';
+            } else if (activeTab.isHtml) {
                 document.getElementById('toggleSplitBtn').style.display = 'none';
                 saveFileBtn.style.display = 'none';
                 document.getElementById('openHtmlBtn').style.display = 'flex';
@@ -3512,7 +3529,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const tab = openTabs.find(t => t.id === activeTabId);
             return tab ? tab.name : null;
         },
-        showCustomPrompt: (msg, def) => showCustomPrompt(msg, def)
+        showCustomPrompt: (msg, def) => showCustomPrompt(msg, def),
+        showToast: (msg, type, ms) => showToast(msg, type, ms),
+        showConfirm: (msg, opts) => showConfirm(msg, opts),
+        // Pestañas virtuales: contenido HTML generado por otros módulos
+        // (review.js, history.js). El HTML debe venir ya escapado/saneado.
+        openVirtualTab: ({ id, name, html }) => {
+            let tab = openTabs.find(t => t.id === id);
+            if (!tab) {
+                tab = { id, name, path: null, handle: null, isLocal: false, isNode: false,
+                        isHtml: false, isVirtual: true, content: html,
+                        rawContent: '', savedContent: '', dirty: false };
+                openTabs.push(tab);
+            } else {
+                tab.name = name;
+                tab.content = html;
+            }
+            setActiveTab(id);
+        },
+        updateVirtualTab: (id, html) => {
+            const tab = openTabs.find(t => t.id === id && t.isVirtual);
+            if (!tab) return false;
+            tab.content = html;
+            if (activeTabId === id) markdownContent.innerHTML = html;
+            return true;
+        },
+        hasTab: (id) => openTabs.some(t => t.id === id),
+        closeTab: (id) => closeTab(id, { skipConfirm: true }),
+        openFile: (absPath) => window.openFileInViewer?.(absPath),
     };
 
     // Exponer openFileTab para que chat.js pueda abrir archivos desde el terminal

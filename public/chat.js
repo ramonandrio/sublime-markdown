@@ -787,8 +787,8 @@ class TerminalController {
         this.panel.style.display = 'flex';
         this.resizer.style.display = 'block';
 
-        // Lanzar PTY
-        const ptyRes = await this.api.terminalStart({ cwd: null });
+        // Lanzar PTY (en la carpeta pedida, p. ej. al reanudar una conversación)
+        const ptyRes = await this.api.terminalStart({ cwd: options.cwd || null });
         if (!ptyRes?.ok) { this.closeTab(tabId); return; }
 
         // La pestaña pudo cerrarse mientras se resolvía el IPC: si ya no existe,
@@ -807,7 +807,7 @@ class TerminalController {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId });
         }));
     }
 
@@ -1488,8 +1488,11 @@ class TerminalController {
                 cmd += ` --remote-control ${shellEscapeArg(`compass-${token}-${hhmm}`)}`;
                 this._claudeRemoteControl = false;
             }
+            // Reanudar una conversación concreta (desde el buscador del historial).
+            if (opts.resume && /^[0-9a-f-]{36}$/i.test(opts.resume)) cmd += ` --resume ${opts.resume}`;
             commandToType = cmd;
             paneLabel = chosenModel ? `Claude (${chosenModel})` : 'Claude';
+            if (opts.resume) paneLabel += ' · reanudada';
         } else if (profile.id === 'ollama') {
             const resolved = await this._resolveOllamaCommand(opts.ollamaModel);
             if (resolved.error) {
@@ -1820,7 +1823,7 @@ class TerminalController {
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId });
         }));
     }
 
@@ -2435,7 +2438,9 @@ class TerminalController {
                     a.detail = null;
                     // Si ya lo estás mirando, no queda nada pendiente.
                     if (document.hasFocus() && pane.term?.textarea === document.activeElement) a.seen = true;
-                    this._notifyAgent(pane, 'listo', a.lastMessage || 'Es tu turno');
+                    const toReview = window.reviewCtrl?.byPane(ptyId).length || 0;
+                    const reviewNote = toReview ? ` · ${toReview} fichero${toReview === 1 ? '' : 's'} por revisar` : '';
+                    this._notifyAgent(pane, 'listo', (a.lastMessage || 'Es tu turno') + reviewNote);
                 }
                 break;
             case 'StopFailure':
@@ -2583,6 +2588,13 @@ class TerminalController {
             });
         });
         const activate = (e) => {
+            const reviewBtn = e.target.closest('.agent-review-open');
+            if (reviewBtn) {
+                e.stopPropagation();
+                this.toggleDashboard(false);
+                window.reviewCtrl?.openForPane(reviewBtn.dataset.pane);
+                return;
+            }
             const recordBtn = e.target.closest('.agent-goal-open');
             if (recordBtn) {
                 e.stopPropagation();
@@ -2694,6 +2706,12 @@ class TerminalController {
                             ${rec.paso ? `<span class="agent-goal-step">${escapeHtml(rec.paso)}</span>` : ''}
                             <button class="agent-goal-open" data-record="${escapeHtml(st.recordPath)}" title="Abrir el registro del objetivo">Registro</button>
                         </div>` : '';
+                const pendingFiles = window.reviewCtrl?.byPane(leaf.ptyId).length || 0;
+                const reviewHtml = pendingFiles ? `
+                        <div class="agent-card-review">
+                            <span>Δ ${pendingFiles} fichero${pendingFiles === 1 ? '' : 's'} con cambios</span>
+                            <button class="agent-goal-open agent-review-open" data-pane="${escapeHtml(leaf.ptyId)}" title="Revisar los cambios de esta sesión">Revisar</button>
+                        </div>` : '';
                 cards.push(`
                     <div class="agent-card state-${st.state}${active ? ' is-active' : ''}" role="button" tabindex="0" data-pty-id="${escapeHtml(leaf.ptyId)}">
                         <div class="agent-card-top">
@@ -2705,6 +2723,7 @@ class TerminalController {
                         <div class="agent-card-title">${escapeHtml(title)}</div>
                         ${sub ? `<div class="agent-card-sub">${sub}</div>` : ''}
                         ${recordHtml}
+                        ${reviewHtml}
                         ${st.detail ? `<div class="agent-card-detail">${escapeHtml(st.detail)}</div>` : ''}
                     </div>`);
             });

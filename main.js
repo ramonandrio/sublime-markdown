@@ -637,6 +637,8 @@ function setupAgentStatus() {
         for (const ev of AGENT_HOOK_EVENTS) {
             hooks[ev] = [{ hooks: [{ type: 'command', command, timeout: 5 }] }];
         }
+        // Solo tras herramientas que editan ficheros: alimenta la revisión de cambios.
+        hooks.PostToolUse = [{ matcher: AGENT_EDIT_TOOLS, hooks: [{ type: 'command', command, timeout: 5 }] }];
         fs.writeFileSync(AGENT_HOOKS_SETTINGS(), JSON.stringify({ hooks }, null, 2));
     } catch (err) {
         warn('[agent-status] no se pudo preparar:', err.message);
@@ -662,6 +664,10 @@ function setupAgentStatus() {
                 // ordenar eventos que llegan casi a la vez (fs.watch no garantiza orden).
                 payload.__writtenAt = writtenAt;
                 const ownerId = require('./terminal-manager').getOwner(paneId);
+                if (payload.hook_event_name === 'PostToolUse') {
+                    recordAgentEdit(paneId, ownerId, payload).catch(() => {});
+                    return;
+                }
                 const win = ownerId != null ? windowData.get(ownerId)?.window : null;
                 if (win && !win.isDestroyed()) {
                     win.webContents.send('agent-status', { paneId, payload: slimAgentPayload(payload) });
@@ -676,6 +682,101 @@ function setupAgentStatus() {
         warn('[agent-status] fs.watch falló:', err.message);
     }
 }
+
+// === REVISIÓN DE CAMBIOS DE LOS AGENTES ===
+// Tras cada Edit/Write de una sesión de Claude, PostToolUse trae el contenido
+// exacto del fichero ANTES del cambio (tool_response.originalFile). La primera
+// vez que se toca un fichero ese contenido queda como "base"; la revisión es
+// el diff base → disco. Aceptar mueve la base; revertir reescribe el fichero.
+// Solo se puede escribir en ficheros registrados aquí (los que editó un agente).
+const AGENT_EDIT_TOOLS = 'Edit|Write|MultiEdit';
+const REVIEW_MAX_BYTES = 2 * 1024 * 1024;
+const agentReviews = new Map(); // ruta → { base, isNew, paneId, ownerId, since, updatedAt }
+
+async function readTextOrNull(file) {
+    try { return await fs.promises.readFile(file, 'utf8'); } catch { return null; }
+}
+
+async function recordAgentEdit(paneId, ownerId, p) {
+    const input = p.tool_input || {};
+    const resp = (p.tool_response && typeof p.tool_response === 'object') ? p.tool_response : {};
+    const filePath = resp.filePath || input.file_path;
+    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return;
+    const file = path.normalize(filePath);
+    // El registro de /objetivo no es un entregable: no se revisa.
+    if (path.basename(path.dirname(file)) === '.objetivos') return;
+    let entry = agentReviews.get(file);
+    if (!entry) {
+        const original = typeof resp.originalFile === 'string' ? resp.originalFile : null;
+        // Sin originalFile solo es fiable un Write de fichero nuevo (base vacía).
+        if (original === null && p.tool_name !== 'Write') return;
+        if (original !== null && original.length > REVIEW_MAX_BYTES) return;
+        entry = { base: original ?? '', isNew: original === null, since: Date.now() };
+        agentReviews.set(file, entry);
+    }
+    entry.paneId = paneId;
+    entry.ownerId = ownerId;
+    entry.updatedAt = Date.now();
+    await refreshReview(file);
+}
+
+// Quita la revisión si ya no hay diferencias (o el fichero no es texto) y avisa.
+async function refreshReview(file) {
+    const entry = agentReviews.get(file);
+    if (entry) {
+        const current = await readTextOrNull(file);
+        const gone = current === null && entry.isNew;           // nuevo y luego borrado
+        const same = current !== null && current === entry.base && !entry.isNew;
+        const binary = current !== null && (current.length > REVIEW_MAX_BYTES || current.includes('\u0000'));
+        if (gone || same || binary || (entry.isNew && current === '' && entry.base === '')) agentReviews.delete(file);
+    }
+    broadcastReviews();
+}
+
+function reviewList() {
+    return [...agentReviews.entries()].map(([file, e]) => ({
+        path: file, paneId: e.paneId, isNew: e.isNew, since: e.since, updatedAt: e.updatedAt,
+    }));
+}
+
+function broadcastReviews() {
+    const list = reviewList();
+    for (const { window: w } of windowData.values()) {
+        if (w && !w.isDestroyed()) w.webContents.send('reviews-changed', list);
+    }
+}
+
+ipcMain.handle('review-list', () => reviewList());
+
+ipcMain.handle('review-get', async (event, p) => {
+    const file = typeof p === 'string' ? path.normalize(p) : '';
+    const entry = agentReviews.get(file);
+    if (!entry) return null;
+    return { path: file, base: entry.base, current: await readTextOrNull(file),
+             isNew: entry.isNew, paneId: entry.paneId };
+});
+
+// Aplica una decisión de la revisión. expectedCurrent protege de pisar cambios
+// hechos mientras se revisaba (otra edición del agente o del usuario).
+ipcMain.handle('review-apply', async (event, p, { expectedCurrent, newCurrent, newBase } = {}) => {
+    const file = typeof p === 'string' ? path.normalize(p) : '';
+    const entry = agentReviews.get(file);
+    if (!entry) return { ok: false, error: 'Ya no hay cambios pendientes en este fichero' };
+    try {
+        if (newCurrent !== undefined) {
+            const disk = await readTextOrNull(file);
+            if (disk !== expectedCurrent) return { ok: false, conflict: true };
+            if (newCurrent === null) await fs.promises.unlink(file);
+            else await fs.promises.writeFile(file, newCurrent, 'utf8');
+        }
+        if (typeof newBase === 'string') { entry.base = newBase; entry.isNew = false; }
+        if (newBase === null) entry.isNew = true;
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+    await refreshReview(file);
+    return { ok: true };
+});
 
 // Solo lo que pinta el panel: evita mandar al renderer tool_input enormes
 // (p. ej. el contenido completo de un Write).
@@ -746,6 +847,169 @@ ipcMain.handle('agent-hooks-settings', () => {
     try {
         return fs.existsSync(AGENT_HOOKS_SETTINGS()) ? AGENT_HOOKS_SETTINGS() : null;
     } catch { return null; }
+});
+
+// === HISTORIAL: búsqueda en conversaciones de Claude y logs de terminal ===
+// Índice en memoria, perezoso y cacheado por (mtime, tamaño). Fuentes:
+//  - ~/.claude/projects/<proyecto>/<sesión>.jsonl  (conversaciones de Claude Code)
+//  - userData/terminal-history/*.log               (scrollback de los panes)
+// Solo se indexa el texto que escribe la persona y el que responde Claude
+// (no salidas de herramientas). La búsqueda ignora mayúsculas y tildes.
+const os = require('os');
+const CLAUDE_PROJECTS_DIR = () => path.join(os.homedir(), '.claude', 'projects');
+const HISTORY_TEXT_MAX = 400_000;   // caracteres indexados por conversación
+const historyIndex = new Map();     // fichero → { mtimeMs, size, doc }
+
+// Minúsculas y sin tildes, conservando la longitud (para recortar fragmentos).
+function foldText(s) {
+    let out = '';
+    for (const ch of s.toLowerCase()) {
+        const base = ch.normalize('NFD').replace(/[̀-ͯ]/g, '');
+        out += base.length === 1 ? base : ch;
+    }
+    return out;
+}
+
+function claudeMessageText(content) {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content.filter(c => c && c.type === 'text' && typeof c.text === 'string').map(c => c.text).join('\n');
+}
+
+// Mensajes que no escribió la persona: comandos locales, avisos del sistema…
+const isNoiseText = (t) => /^\s*<(command-|local-command|system-reminder|task-notification|bash-)/.test(t);
+
+function parseClaudeSession(file, raw) {
+    const id = path.basename(file, '.jsonl');
+    let cwd = null, title = null, firstPrompt = null, first = null, last = null, prompts = 0;
+    let text = '';
+    for (const line of raw.split('\n')) {
+        if (!line) continue;
+        let d;
+        try { d = JSON.parse(line); } catch { continue; }
+        if (d.type === 'ai-title' && d.aiTitle) title = d.aiTitle;
+        if (d.type === 'custom-title' && d.customTitle) title = d.customTitle;
+        if (d.type !== 'user' && d.type !== 'assistant') continue;
+        if (d.isSidechain || d.isMeta) continue;
+        if (!cwd && d.cwd) cwd = d.cwd;
+        const t = claudeMessageText(d.message?.content).trim();
+        if (!t || isNoiseText(t)) continue;
+        if (d.timestamp) { first = first || d.timestamp; last = d.timestamp; }
+        if (d.type === 'user') { prompts++; if (!firstPrompt) firstPrompt = t; }
+        if (text.length < HISTORY_TEXT_MAX) text += (d.type === 'user' ? '\n» ' : '\n') + t;
+    }
+    if (!prompts) return null;
+    return { kind: 'claude', id, file, cwd, prompts,
+             title: title || firstPrompt.replace(/\s+/g, ' ').slice(0, 100),
+             first, last, text, folded: foldText(text) };
+}
+
+function parseTerminalLog(file, raw, mtimeMs) {
+    const head = raw.slice(0, 600);
+    const title = head.match(/^# Terminal: (.*)$/m)?.[1] || 'Terminal';
+    const cwd = head.match(/cwd: (\S+)/)?.[1];
+    const saved = head.match(/# Guardado: (\S+)/)?.[1];
+    const sep = raw.indexOf('─'.repeat(20));
+    const text = (sep >= 0 ? raw.slice(raw.indexOf('\n', sep) + 1) : raw).slice(-HISTORY_TEXT_MAX);
+    return { kind: 'terminal', id: path.basename(file), file, title,
+             cwd: cwd && cwd !== '?' ? cwd : null,
+             first: null, last: saved || new Date(mtimeMs).toISOString(), text, folded: foldText(text) };
+}
+
+async function refreshHistoryIndex() {
+    const files = [];
+    try {
+        for (const proj of await fs.promises.readdir(CLAUDE_PROJECTS_DIR())) {
+            const dir = path.join(CLAUDE_PROJECTS_DIR(), proj);
+            let names = [];
+            try { names = await fs.promises.readdir(dir); } catch { continue; }
+            for (const n of names) if (n.endsWith('.jsonl')) files.push({ file: path.join(dir, n), kind: 'claude' });
+        }
+    } catch { /* sin ~/.claude/projects */ }
+    try {
+        for (const n of await fs.promises.readdir(TERM_HISTORY_DIR())) {
+            if (n.endsWith('.log')) files.push({ file: path.join(TERM_HISTORY_DIR(), n), kind: 'terminal' });
+        }
+    } catch { /* sin historial de terminal */ }
+
+    const seen = new Set();
+    for (const { file, kind } of files) {
+        seen.add(file);
+        let st;
+        try { st = await fs.promises.stat(file); } catch { continue; }
+        const cached = historyIndex.get(file);
+        if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) continue;
+        try {
+            const raw = await fs.promises.readFile(file, 'utf8');
+            const doc = kind === 'claude' ? parseClaudeSession(file, raw) : parseTerminalLog(file, raw, st.mtimeMs);
+            historyIndex.set(file, { mtimeMs: st.mtimeMs, size: st.size, doc });
+        } catch { /* fichero ilegible: se ignora */ }
+    }
+    for (const file of historyIndex.keys()) if (!seen.has(file)) historyIndex.delete(file);
+}
+
+function historySnippet(doc, pos, len) {
+    const start = Math.max(0, pos - 90);
+    const end = Math.min(doc.text.length, pos + len + 140);
+    return { text: (start ? '…' : '') + doc.text.slice(start, end).replace(/\s+/g, ' ') + (end < doc.text.length ? '…' : ''),
+             // posición de la coincidencia dentro del fragmento (para resaltarla)
+             at: pos - start + (start ? 1 : 0), len };
+}
+
+ipcMain.handle('history-search', async (event, query = '', { limit = 40 } = {}) => {
+    await refreshHistoryIndex();
+    const terms = foldText(String(query)).split(/\s+/).filter(Boolean).slice(0, 8);
+    const out = [];
+    for (const { doc } of historyIndex.values()) {
+        if (!doc) continue;
+        let snippet = null;
+        if (terms.length) {
+            const hay = doc.folded + '\n' + foldText(doc.title || '');
+            if (!terms.every(t => hay.includes(t))) continue;
+            const pos = doc.folded.indexOf(terms[0]);
+            if (pos >= 0) snippet = historySnippet(doc, pos, terms[0].length);
+        }
+        out.push({ kind: doc.kind, id: doc.id, title: doc.title, cwd: doc.cwd,
+                   last: doc.last, prompts: doc.prompts, snippet });
+    }
+    out.sort((a, b) => String(b.last || '').localeCompare(String(a.last || '')));
+    return out.slice(0, Math.min(limit, 200));
+});
+
+// Conversación (o log) completa como Markdown legible para el visor.
+ipcMain.handle('history-open', async (event, kind, id) => {
+    const entry = [...historyIndex.values()].find(e => e.doc && e.doc.kind === kind && e.doc.id === id);
+    if (!entry) return null;
+    const doc = entry.doc;
+    if (kind === 'terminal') {
+        return { title: doc.title, cwd: doc.cwd, markdown: '```text\n' + doc.text.replace(/```/g, 'ˋˋˋ') + '\n```' };
+    }
+    let raw;
+    try { raw = await fs.promises.readFile(doc.file, 'utf8'); } catch { return null; }
+    const fmt = (iso) => iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    let md = `# ${doc.title}\n\n`;
+    md += `**Carpeta:** \`${doc.cwd || '?'}\` · **Inicio:** ${fmt(doc.first)} · **Última actividad:** ${fmt(doc.last)} · **Sesión:** \`${doc.id}\`\n\n---\n`;
+    for (const line of raw.split('\n')) {
+        if (md.length > 600_000) { md += '\n\n*(conversación recortada)*\n'; break; }
+        let d;
+        try { d = JSON.parse(line); } catch { continue; }
+        if ((d.type !== 'user' && d.type !== 'assistant') || d.isSidechain || d.isMeta) continue;
+        const content = d.message?.content;
+        const t = claudeMessageText(content).trim();
+        const tools = Array.isArray(content)
+            ? content.filter(c => c?.type === 'tool_use').map(c => {
+                const inp = c.input || {};
+                const target = inp.file_path || inp.path || inp.command || inp.pattern || inp.url || inp.description || '';
+                return `> 🔧 ${c.name}${target ? ` · \`${String(target).replace(/`/g, "'").slice(0, 140)}\`` : ''}`;
+            }) : [];
+        if (d.type === 'user') {
+            if (!t || isNoiseText(t)) continue;
+            md += `\n### 🧑 Tú · ${fmt(d.timestamp)}\n\n${t}\n`;
+        } else if (t || tools.length) {
+            md += `\n### ✦ Claude\n\n${t ? t + '\n' : ''}${tools.length ? '\n' + tools.join('\n') + '\n' : ''}`;
+        }
+    }
+    return { title: doc.title, cwd: doc.cwd, sessionId: doc.id, markdown: md };
 });
 
 app.whenReady().then(async () => {

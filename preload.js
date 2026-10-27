@@ -39,6 +39,13 @@ contextBridge.exposeInMainWorld('api', {
     // Registros de /objetivo: cabecera para el panel y abrir con la app del SO
     objectiveRead: (filePath) => ipcRenderer.invoke('objective-read', filePath),
     objectiveOpen: (filePath) => ipcRenderer.invoke('objective-open', filePath),
+    // Revisión de cambios hechos por agentes (ver main.js: agentReviews)
+    reviewList:  ()                  => ipcRenderer.invoke('review-list'),
+    reviewGet:   (filePath)          => ipcRenderer.invoke('review-get', filePath),
+    reviewApply: (filePath, change)  => ipcRenderer.invoke('review-apply', filePath, change),
+    // Historial: búsqueda en conversaciones de Claude y logs de terminal
+    historySearch: (query, opts)     => ipcRenderer.invoke('history-search', query, opts),
+    historyOpen:   (kind, id)        => ipcRenderer.invoke('history-open', kind, id),
     terminalNotify: (payload)         => ipcRenderer.send('terminal-notify', payload),
     setWindowTitle: (payload)         => ipcRenderer.send('set-window-title', payload),
 
@@ -50,6 +57,7 @@ contextBridge.exposeInMainWorld('api', {
     onSoftRefresh:    (cb) => ipcRenderer.on('soft-refresh',    () => cb()),
     onFocusPane:      (cb) => ipcRenderer.on('focus-pane',      (_event, payload) => cb(payload)),
     onAgentStatus:    (cb) => ipcRenderer.on('agent-status',    (_event, payload) => cb(payload)),
+    onReviewsChanged: (cb) => ipcRenderer.on('reviews-changed', (_event, list) => cb(list)),
 
     // ── Helpers no-IPC ───────────────────────────────────────────────────────
     // webUtils.getPathForFile(file) — devuelve la ruta absoluta de un File

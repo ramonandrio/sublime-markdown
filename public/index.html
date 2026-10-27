@@ -36,7 +36,7 @@
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 
     <!-- Estilos propios -->
-    <link rel="stylesheet" href="styles.css?v=5">
+    <link rel="stylesheet" href="styles.css?v=6">
 </head>
 
 <body>
@@ -100,6 +100,9 @@
                                 d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z">
                             </path>
                         </svg>
+                    </button>
+                    <button id="historySearchBtn" class="action-btn" title="Buscar en el historial (⌘K)" aria-label="Buscar en el historial">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v3l2 1.5"/></svg>
                     </button>
                     <button id="settingsBtn" class="action-btn" title="Ajustes" aria-label="Ajustes">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -426,8 +429,11 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 
     <!-- Módulos de la aplicación -->
-    <script src="chat.js?v=19"></script>
-    <script src="app.js?v=17"></script>
+    <script src="chat.js?v=20"></script>
+    <script src="node_modules/diff/dist/diff.min.js"></script>
+    <script src="app.js?v=18"></script>
+    <script src="review.js?v=1"></script>
+    <script src="history.js?v=1"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
