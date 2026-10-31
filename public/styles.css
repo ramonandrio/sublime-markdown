@@ -2573,7 +2573,7 @@ mark.find-highlight.find-current {
 .agent-dashboard {
     position: absolute;
     inset: 0;
-    z-index: 5;
+    z-index: 30; /* por encima de los separadores de panes (z-index 10–20) */
     display: flex;
     flex-direction: column;
     background: var(--bg-darker);
@@ -3171,4 +3171,30 @@ mark.find-highlight.find-current {
     background: var(--bg-hover);
     color: var(--text-primary);
     font-weight: 500;
+}
+
+/* ── Cuenta de Claude distinta de la de siempre: tinte discreto ────────────── */
+.pane-leaf[data-account] {
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--acct) 55%, transparent);
+}
+
+.pane-leaf[data-account] .pane-header {
+    background: color-mix(in srgb, var(--acct) 9%, var(--bg-tertiary, #f0f0f0));
+    border-bottom-color: color-mix(in srgb, var(--acct) 30%, var(--border-color, #e0e0e0));
+}
+
+.pane-leaf[data-account] .pane-title {
+    color: color-mix(in srgb, var(--acct) 80%, var(--text-muted, #888));
+}
+
+.terminal-tab.has-account {
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--acct) 70%, transparent);
+}
+
+.agent-account {
+    padding: 0 6px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--acct) 12%, transparent);
+    color: var(--acct);
+    font-weight: 600;
 }

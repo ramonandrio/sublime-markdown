@@ -158,6 +158,16 @@ function parseClaudeAccounts(raw) {
 
 const sameClaudeDir = (a, b) => (a || '').replace(/\/+$/, '') === (b || '').replace(/\/+$/, '');
 
+// Color discreto para distinguir a simple vista las cuentas que no son la de
+// siempre (~/.claude no lleva color). Se asigna por orden en Ajustes.
+const CLAUDE_ACCOUNT_COLORS = ['#8250df', '#1a7f37', '#bf8700', '#0969da'];
+function claudeAccountColor(accounts, dir) {
+    if (!dir || sameClaudeDir(dir, '~/.claude')) return null;
+    const others = accounts.filter(a => !sameClaudeDir(a.dir, '~/.claude'));
+    const i = others.findIndex(a => sameClaudeDir(a.dir, dir));
+    return CLAUDE_ACCOUNT_COLORS[(i < 0 ? others.length : i) % CLAUDE_ACCOUNT_COLORS.length];
+}
+
 // Prefijo de entorno para lanzar `claude` con la cuenta de esa carpeta.
 function claudeConfigPrefix(dir) {
     if (!dir || sameClaudeDir(dir, '~/.claude')) return '';
@@ -522,6 +532,8 @@ class TerminalController {
         }
         // Indicador visual en la pestaña.
         this.tabs.get(pane.tabId)?.tabBtn.classList.add('pane-exited');
+        pane._claudeAccount = null;
+        this._paintPaneAccount(pane);
         this._clearStuckTimer(pane);
         this._refreshDashboard();
     }
@@ -833,7 +845,7 @@ class TerminalController {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir, account: options.account });
         }));
     }
 
@@ -1524,7 +1536,10 @@ class TerminalController {
             if (account.showLabel) paneLabel += ` · ${account.label}`;
             if (opts.resume) paneLabel += ' · reanudada';
             const launched = this.panes.get(ptyId);
-            if (launched) launched._claudeAccount = account;
+            if (launched) {
+                launched._claudeAccount = account;
+                this._paintPaneAccount(launched);
+            }
         } else if (profile.id === 'ollama') {
             const resolved = await this._resolveOllamaCommand(opts.ollamaModel);
             if (resolved.error) {
@@ -1739,18 +1754,46 @@ class TerminalController {
     // Se renderizan indentados bajo el ítem "Claude" del menú, con el mismo
     // patrón que los modelos de Ollama. La lista y el default son editables en
     // Ajustes; se re-renderiza en cada apertura, así los cambios se reflejan ya.
+    // Tinte de la cuenta en el pane y en su pestaña (solo cuentas con color).
+    _paintPaneAccount(pane) {
+        const el = pane?.leafNode?.el;
+        if (!el) return;
+        const color = pane._claudeAccount?.color;
+        if (color) {
+            el.dataset.account = pane._claudeAccount.label;
+            el.style.setProperty('--acct', color);
+        } else {
+            delete el.dataset.account;
+            el.style.removeProperty('--acct');
+        }
+        // La pestaña toma el color si alguno de sus panes lo tiene.
+        const tab = this.tabs.get(pane.tabId);
+        if (!tab) return;
+        const tinted = [...this.panes.values()].find(p => p.tabId === pane.tabId && p._claudeAccount?.color);
+        tab.tabBtn.classList.toggle('has-account', !!tinted);
+        if (tinted) {
+            tab.tabBtn.style.setProperty('--acct', tinted._claudeAccount.color);
+            tab.tabBtn.title = `Cuenta de Claude: ${tinted._claudeAccount.label}`;
+        } else {
+            tab.tabBtn.style.removeProperty('--acct');
+            tab.tabBtn.removeAttribute('title');
+        }
+    }
+
     // Cuenta con la que se lanza Claude. opts.configDir (reanudar) manda; si no,
     // la elegida en el menú; si no, la de Ajustes; si no, la primera.
     async _resolveClaudeAccount(opts = {}) {
         const accounts = parseClaudeAccounts(await loadSetting('claude_accounts'));
         const showLabel = accounts.length > 1;
+        let acct;
         if (opts.configDir) {
-            const hit = accounts.find(a => sameClaudeDir(a.dir, opts.configDir));
-            return { ...(hit || { label: opts.configDir.split('/').pop(), dir: opts.configDir }), showLabel };
+            acct = accounts.find(a => sameClaudeDir(a.dir, opts.configDir))
+                || { label: opts.configDir.split('/').pop(), dir: opts.configDir };
+        } else {
+            const wanted = opts.account || this._claudeAccount || await loadSetting('claude_default_account');
+            acct = accounts.find(a => a.label === wanted) || accounts[0] || { label: 'Claude', dir: '~/.claude' };
         }
-        const wanted = opts.account || this._claudeAccount || await loadSetting('claude_default_account');
-        const acct = accounts.find(a => a.label === wanted) || accounts[0] || { label: 'Claude', dir: '~/.claude' };
-        return { ...acct, showLabel };
+        return { ...acct, showLabel, color: claudeAccountColor(accounts, acct.dir) };
     }
 
     async renderClaudeModelItems(containerEl, onSelect) {
@@ -1893,7 +1936,7 @@ class TerminalController {
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir, account: options.account });
         }));
     }
 
@@ -2445,9 +2488,12 @@ class TerminalController {
         const pane = this.panes.get(ptyId);
         if (!pane || pane._disposed || !p) return;
         if (p.event === 'SessionEnd') {
-            // Claude terminó y el pane vuelve a ser una shell: estado aproximado.
+            // Claude terminó y el pane vuelve a ser una shell: estado aproximado
+            // y sin el color de la cuenta (la shell no es de ninguna cuenta).
             this._clearStuckTimer(pane);
             pane.agent = null;
+            pane._claudeAccount = null;
+            this._paintPaneAccount(pane);
             this._refreshDashboard();
             return;
         }
@@ -2791,6 +2837,7 @@ class TerminalController {
                             <span class="agent-dot"></span>
                             <span class="agent-state">${meta.label}</span>
                             ${st.exact ? '' : '<span class="agent-approx" title="Estado aproximado por la actividad del terminal (sin hooks)">≈</span>'}
+                            ${pane._claudeAccount?.color ? `<span class="agent-account" style="--acct:${pane._claudeAccount.color}">${escapeHtml(pane._claudeAccount.label)}</span>` : ''}
                             <span class="agent-ago">${ago(st.since)}</span>
                         </div>
                         <div class="agent-card-title">${escapeHtml(title)}</div>
