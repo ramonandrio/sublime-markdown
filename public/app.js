@@ -3093,6 +3093,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const claudeModelsSave         = document.getElementById('claudeModelsSave');
         const claudeModelsStatus       = document.getElementById('claudeModelsStatus');
         const CLAUDE_MODELS_STORE        = 'claude_models';
+        // Cuentas de Claude (fuente única del formato y del default: chat.js)
+        const claudeAccountsInput        = document.getElementById('claudeAccountsInput');
+        const claudeDefaultAccountSelect = document.getElementById('claudeDefaultAccountSelect');
+        const claudeAccountsSave         = document.getElementById('claudeAccountsSave');
+        const claudeAccountsStatus       = document.getElementById('claudeAccountsStatus');
         const CLAUDE_DEFAULT_MODEL_STORE = 'claude_default_model';
         // Lista real por defecto: fuente única en chat.js (se carga antes que
         // app.js). Formato "Etiqueta=modelo" separado por comas.
@@ -3166,6 +3171,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
+            // Claude Code — cuentas + default
+            if (claudeAccountsInput) {
+                Promise.all([idbGet('claude_accounts'), idbGet('claude_default_account')])
+                    .then(([raw, def]) => {
+                        claudeAccountsInput.value = (typeof raw === 'string' && raw.trim()) ? raw : CLAUDE_DEFAULT_ACCOUNTS_STR;
+                        syncClaudeAccountOptions(def || '');
+                    });
+            }
+
             // Claude Code — lista de modelos + default
             if (claudeModelsInput) {
                 Promise.all([idbGet(CLAUDE_MODELS_STORE), idbGet(CLAUDE_DEFAULT_MODEL_STORE)])
@@ -3199,6 +3213,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (m.value === want) opt.selected = true;
                 claudeDefaultModelSelect.appendChild(opt);
             }
+        }
+
+        function syncClaudeAccountOptions(selected) {
+            if (!claudeDefaultAccountSelect) return;
+            const want = selected != null ? selected : claudeDefaultAccountSelect.value;
+            const accounts = parseClaudeAccounts(claudeAccountsInput?.value || '');
+            claudeDefaultAccountSelect.innerHTML = '';
+            accounts.forEach((a, i) => {
+                const opt = document.createElement('option');
+                opt.value = a.label;
+                opt.textContent = `${a.label} (${a.dir})`;
+                if (a.label === want || (!want && i === 0)) opt.selected = true;
+                claudeDefaultAccountSelect.appendChild(opt);
+            });
+        }
+
+        if (claudeAccountsInput) {
+            claudeAccountsInput.addEventListener('input', () => syncClaudeAccountOptions());
+        }
+        if (claudeAccountsSave) {
+            claudeAccountsSave.addEventListener('click', async () => {
+                const raw = (claudeAccountsInput?.value || '').trim();
+                const valid = parseClaudeAccounts(raw);
+                if (raw && !valid.length) {
+                    setStatus(claudeAccountsStatus, 'Formato no válido: Etiqueta=carpeta', 'err');
+                    return;
+                }
+                await idbPut('claude_accounts', raw);
+                await idbPut('claude_default_account', claudeDefaultAccountSelect?.value || '');
+                setStatus(claudeAccountsStatus, 'Guardado', 'ok');
+            });
         }
 
         function closeModal() {

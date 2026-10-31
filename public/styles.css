@@ -3164,3 +3164,11 @@ mark.find-highlight.find-current {
     justify-content: flex-end;
     margin-bottom: 8px;
 }
+
+.hist-account {
+    padding: 0 5px;
+    border-radius: 6px;
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    font-weight: 500;
+}

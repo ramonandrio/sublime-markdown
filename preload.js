@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('api', {
     reviewApply: (filePath, change)  => ipcRenderer.invoke('review-apply', filePath, change),
     // Historial: búsqueda en conversaciones de Claude y logs de terminal
     historySearch: (query, opts)     => ipcRenderer.invoke('history-search', query, opts),
-    historyOpen:   (kind, id)        => ipcRenderer.invoke('history-open', kind, id),
+    historyOpen:   (kind, id, cfg)   => ipcRenderer.invoke('history-open', kind, id, cfg),
     terminalNotify: (payload)         => ipcRenderer.send('terminal-notify', payload),
     setWindowTitle: (payload)         => ipcRenderer.send('set-window-title', payload),
 

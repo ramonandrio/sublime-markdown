@@ -856,7 +856,19 @@ ipcMain.handle('agent-hooks-settings', () => {
 // Solo se indexa el texto que escribe la persona y el que responde Claude
 // (no salidas de herramientas). La búsqueda ignora mayúsculas y tildes.
 const os = require('os');
-const CLAUDE_PROJECTS_DIR = () => path.join(os.homedir(), '.claude', 'projects');
+// Una carpeta de config por cuenta (CLAUDE_CONFIG_DIR): ~/.claude, ~/.claude-perso…
+// Cada conversación recuerda la suya: --resume solo la encuentra con esa cuenta.
+async function claudeConfigDirs() {
+    const out = [];
+    try {
+        for (const name of await fs.promises.readdir(os.homedir())) {
+            if (!/^\.claude(-[\w-]+)?$/.test(name)) continue;
+            const projects = path.join(os.homedir(), name, 'projects');
+            try { if ((await fs.promises.stat(projects)).isDirectory()) out.push({ configDir: `~/${name}`, projects }); } catch { /* sin projects */ }
+        }
+    } catch { /* home ilegible */ }
+    return out;
+}
 const HISTORY_TEXT_MAX = 400_000;   // caracteres indexados por conversación
 const historyIndex = new Map();     // fichero → { mtimeMs, size, doc }
 
@@ -879,7 +891,7 @@ function claudeMessageText(content) {
 // Mensajes que no escribió la persona: comandos locales, avisos del sistema…
 const isNoiseText = (t) => /^\s*<(command-|local-command|system-reminder|task-notification|bash-)/.test(t);
 
-function parseClaudeSession(file, raw) {
+function parseClaudeSession(file, raw, configDir) {
     const id = path.basename(file, '.jsonl');
     let cwd = null, title = null, firstPrompt = null, first = null, last = null, prompts = 0;
     let text = '';
@@ -899,7 +911,7 @@ function parseClaudeSession(file, raw) {
         if (text.length < HISTORY_TEXT_MAX) text += (d.type === 'user' ? '\n» ' : '\n') + t;
     }
     if (!prompts) return null;
-    return { kind: 'claude', id, file, cwd, prompts,
+    return { kind: 'claude', id, file, cwd, prompts, configDir,
              title: title || firstPrompt.replace(/\s+/g, ' ').slice(0, 100),
              first, last, text, folded: foldText(text) };
 }
@@ -918,14 +930,16 @@ function parseTerminalLog(file, raw, mtimeMs) {
 
 async function refreshHistoryIndex() {
     const files = [];
-    try {
-        for (const proj of await fs.promises.readdir(CLAUDE_PROJECTS_DIR())) {
-            const dir = path.join(CLAUDE_PROJECTS_DIR(), proj);
+    for (const { configDir, projects } of await claudeConfigDirs()) {
+        let projs = [];
+        try { projs = await fs.promises.readdir(projects); } catch { continue; }
+        for (const proj of projs) {
+            const dir = path.join(projects, proj);
             let names = [];
             try { names = await fs.promises.readdir(dir); } catch { continue; }
-            for (const n of names) if (n.endsWith('.jsonl')) files.push({ file: path.join(dir, n), kind: 'claude' });
+            for (const n of names) if (n.endsWith('.jsonl')) files.push({ file: path.join(dir, n), kind: 'claude', configDir });
         }
-    } catch { /* sin ~/.claude/projects */ }
+    }
     try {
         for (const n of await fs.promises.readdir(TERM_HISTORY_DIR())) {
             if (n.endsWith('.log')) files.push({ file: path.join(TERM_HISTORY_DIR(), n), kind: 'terminal' });
@@ -933,7 +947,7 @@ async function refreshHistoryIndex() {
     } catch { /* sin historial de terminal */ }
 
     const seen = new Set();
-    for (const { file, kind } of files) {
+    for (const { file, kind, configDir } of files) {
         seen.add(file);
         let st;
         try { st = await fs.promises.stat(file); } catch { continue; }
@@ -941,7 +955,7 @@ async function refreshHistoryIndex() {
         if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size) continue;
         try {
             const raw = await fs.promises.readFile(file, 'utf8');
-            const doc = kind === 'claude' ? parseClaudeSession(file, raw) : parseTerminalLog(file, raw, st.mtimeMs);
+            const doc = kind === 'claude' ? parseClaudeSession(file, raw, configDir) : parseTerminalLog(file, raw, st.mtimeMs);
             historyIndex.set(file, { mtimeMs: st.mtimeMs, size: st.size, doc });
         } catch { /* fichero ilegible: se ignora */ }
     }
@@ -969,7 +983,7 @@ ipcMain.handle('history-search', async (event, query = '', { limit = 40 } = {}) 
             const pos = doc.folded.indexOf(terms[0]);
             if (pos >= 0) snippet = historySnippet(doc, pos, terms[0].length);
         }
-        out.push({ kind: doc.kind, id: doc.id, title: doc.title, cwd: doc.cwd,
+        out.push({ kind: doc.kind, id: doc.id, title: doc.title, cwd: doc.cwd, configDir: doc.configDir,
                    last: doc.last, prompts: doc.prompts, snippet });
     }
     out.sort((a, b) => String(b.last || '').localeCompare(String(a.last || '')));
@@ -977,8 +991,10 @@ ipcMain.handle('history-search', async (event, query = '', { limit = 40 } = {}) 
 });
 
 // Conversación (o log) completa como Markdown legible para el visor.
-ipcMain.handle('history-open', async (event, kind, id) => {
-    const entry = [...historyIndex.values()].find(e => e.doc && e.doc.kind === kind && e.doc.id === id);
+ipcMain.handle('history-open', async (event, kind, id, configDir) => {
+    // El mismo id podría existir en dos cuentas: el renderer manda configDir.
+    const entry = [...historyIndex.values()].find(e => e.doc && e.doc.kind === kind && e.doc.id === id
+        && (!configDir || e.doc.configDir === configDir));
     if (!entry) return null;
     const doc = entry.doc;
     if (kind === 'terminal') {
@@ -988,7 +1004,7 @@ ipcMain.handle('history-open', async (event, kind, id) => {
     try { raw = await fs.promises.readFile(doc.file, 'utf8'); } catch { return null; }
     const fmt = (iso) => iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '';
     let md = `# ${doc.title}\n\n`;
-    md += `**Carpeta:** \`${doc.cwd || '?'}\` · **Inicio:** ${fmt(doc.first)} · **Última actividad:** ${fmt(doc.last)} · **Sesión:** \`${doc.id}\`\n\n---\n`;
+    md += `**Cuenta:** \`${doc.configDir}\` · **Carpeta:** \`${doc.cwd || '?'}\` · **Inicio:** ${fmt(doc.first)} · **Última actividad:** ${fmt(doc.last)} · **Sesión:** \`${doc.id}\`\n\n---\n`;
     for (const line of raw.split('\n')) {
         if (md.length > 600_000) { md += '\n\n*(conversación recortada)*\n'; break; }
         let d;
@@ -1009,7 +1025,7 @@ ipcMain.handle('history-open', async (event, kind, id) => {
             md += `\n### ✦ Claude\n\n${t ? t + '\n' : ''}${tools.length ? '\n' + tools.join('\n') + '\n' : ''}`;
         }
     }
-    return { title: doc.title, cwd: doc.cwd, sessionId: doc.id, markdown: md };
+    return { title: doc.title, cwd: doc.cwd, sessionId: doc.id, configDir: doc.configDir, markdown: md };
 });
 
 app.whenReady().then(async () => {

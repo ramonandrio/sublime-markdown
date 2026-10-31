@@ -27,6 +27,13 @@
         return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: days > 300 ? 'numeric' : undefined });
     };
     const home = (p) => (p || '').replace(/^\/Users\/[^/]+/, '~');
+    // Etiqueta de la cuenta (Ajustes > Cuentas) para la carpeta de config.
+    let accounts = [];
+    const refreshAccounts = async () => { accounts = parseClaudeAccounts(await loadSetting('claude_accounts')); };
+    const accountLabel = (dir) => {
+        if (!dir) return '';
+        return accounts.find(a => sameClaudeDir(a.dir, dir))?.label || dir;
+    };
 
     function build() {
         overlay = document.createElement('div');
@@ -100,7 +107,7 @@
                     <span class="hist-title">${escapeHtml(r.title || 'Sin título')}</span>
                     <span class="hist-when">${escapeHtml(ago(r.last))}</span>
                 </div>
-                <div class="hist-meta">${escapeHtml(home(r.cwd) || (r.kind === 'terminal' ? 'Log de terminal' : ''))}${r.prompts ? ` · ${r.prompts} mensaje(s) tuyos` : ''}</div>
+                <div class="hist-meta">${r.kind === 'claude' && accounts.length > 1 ? `<span class="hist-account">${escapeHtml(accountLabel(r.configDir))}</span> ` : ''}${escapeHtml(home(r.cwd) || (r.kind === 'terminal' ? 'Log de terminal' : ''))}${r.prompts ? ` · ${r.prompts} mensaje(s) tuyos` : ''}</div>
                 ${r.snippet ? `<div class="hist-snippet">${snippetHtml(r.snippet)}</div>` : ''}
                 <div class="hist-actions">
                     <button type="button" class="rv-btn" data-act="view">Ver</button>
@@ -112,13 +119,13 @@
     async function view(r) {
         if (!r) return;
         close();
-        const data = await api.historyOpen(r.kind, r.id).catch(() => null);
+        const data = await api.historyOpen(r.kind, r.id, r.configDir).catch(() => null);
         if (!data) { window.app.showToast('No se pudo abrir ese historial.', 'warning'); return; }
         const body = (window.marked && window.DOMPurify)
             ? DOMPurify.sanitize(marked.parse(data.markdown))
             : `<pre>${escapeHtml(data.markdown)}</pre>`;
         const resumeBtn = r.kind === 'claude' && r.cwd
-            ? `<button class="rv-btn rv-primary" data-hist-resume="${escapeHtml(r.id)}" data-hist-cwd="${escapeHtml(r.cwd)}" data-hist-title="${escapeHtml(r.title || '')}">Reanudar en un terminal</button>`
+            ? `<button class="rv-btn rv-primary" data-hist-resume="${escapeHtml(r.id)}" data-hist-cwd="${escapeHtml(r.cwd)}" data-hist-cfg="${escapeHtml(r.configDir || '')}" data-hist-title="${escapeHtml(r.title || '')}">Reanudar en un terminal</button>`
             : '';
         window.app.openVirtualTab({
             id: `history:${r.kind}:${r.id}`,
@@ -131,13 +138,15 @@
         if (!r || r.kind !== 'claude' || !r.cwd) return;
         if (!/^[0-9a-f-]{36}$/i.test(r.id)) return;
         close();
+        // Misma cuenta que la conversación: --resume no ve las de otras cuentas.
         window.terminalCtrl?.createTab({
-            profile: 'claude', resumeId: r.id, cwd: r.cwd,
+            profile: 'claude', resumeId: r.id, cwd: r.cwd, configDir: r.configDir || '~/.claude',
             fileName: (r.title || 'Claude').slice(0, 30),
         });
     }
 
-    function open() {
+    async function open() {
+        await refreshAccounts();
         if (!overlay) build();
         overlay.hidden = false;
         input.value = '';
@@ -161,7 +170,7 @@
     document.addEventListener('click', (e) => {
         const b = e.target.closest('[data-hist-resume]');
         if (!b) return;
-        resume({ kind: 'claude', id: b.dataset.histResume, cwd: b.dataset.histCwd, title: b.dataset.histTitle });
+        resume({ kind: 'claude', id: b.dataset.histResume, cwd: b.dataset.histCwd, configDir: b.dataset.histCfg, title: b.dataset.histTitle });
     });
 
     document.getElementById('historySearchBtn')?.addEventListener('click', open);

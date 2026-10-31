@@ -139,6 +139,32 @@ const CLAUDE_DEFAULT_MODELS_STR =
     'Fable 5.1=claude-fable-5-1, Fable 5=claude-fable-5, ' +
     'Sonnet 4.6=sonnet, Sonnet 4.6 (1M)=claude-sonnet-4-6[1m], Haiku 4.5=haiku';
 
+// Cuentas de Claude (editables en Ajustes): "Etiqueta=carpeta de config".
+// Cada carpeta guarda su propio login (CLAUDE_CONFIG_DIR); ~/.claude es la de
+// siempre y se lanza sin variable, exactamente como antes.
+const CLAUDE_DEFAULT_ACCOUNTS_STR = 'Trabajo=~/.claude, Personal=~/.claude-perso';
+
+function parseClaudeAccounts(raw) {
+    const source = (raw && typeof raw === 'string' && raw.trim()) ? raw : CLAUDE_DEFAULT_ACCOUNTS_STR;
+    return source.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(entry => {
+        const eq = entry.indexOf('=');
+        const label = (eq === -1 ? entry : entry.slice(0, eq)).trim();
+        const dir = (eq === -1 ? entry : entry.slice(eq + 1)).trim().replace(/\/+$/, '');
+        return { label, dir };
+    })
+    // Solo rutas sencillas: se interpolan en un comando de shell.
+    .filter(a => a.label && /^~?[\w./-]+$/.test(a.dir));
+}
+
+const sameClaudeDir = (a, b) => (a || '').replace(/\/+$/, '') === (b || '').replace(/\/+$/, '');
+
+// Prefijo de entorno para lanzar `claude` con la cuenta de esa carpeta.
+function claudeConfigPrefix(dir) {
+    if (!dir || sameClaudeDir(dir, '~/.claude')) return '';
+    const expanded = dir.startsWith('~/') ? '$HOME/' + dir.slice(2) : dir;
+    return `CLAUDE_CONFIG_DIR="${expanded}" `;
+}
+
 // Devuelve [{ label, value }]. Trocea por comas/saltos, hace trim y descarta
 // vacíos. Si no hay nada guardado, usa la lista real por defecto.
 function parseClaudeModels(raw) {
@@ -807,7 +833,7 @@ class TerminalController {
             this._fitLeaf(leafNode);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir });
         }));
     }
 
@@ -1457,6 +1483,9 @@ class TerminalController {
         };
 
         if (profile.id === 'claude') {
+            // Cuenta: la de la conversación que se reanuda (opts.configDir), la
+            // elegida en el menú o la de Ajustes. Se fija al arrancar el proceso.
+            const account = await this._resolveClaudeAccount(opts);
             // Modelo: el elegido en el menú (opts.model) tiene prioridad; si no,
             // el default guardado en Ajustes; si tampoco, se lanza sin --model
             // (el CLI usa su propio default).
@@ -1490,9 +1519,12 @@ class TerminalController {
             }
             // Reanudar una conversación concreta (desde el buscador del historial).
             if (opts.resume && /^[0-9a-f-]{36}$/i.test(opts.resume)) cmd += ` --resume ${opts.resume}`;
-            commandToType = cmd;
+            commandToType = claudeConfigPrefix(account.dir) + cmd;
             paneLabel = chosenModel ? `Claude (${chosenModel})` : 'Claude';
+            if (account.showLabel) paneLabel += ` · ${account.label}`;
             if (opts.resume) paneLabel += ' · reanudada';
+            const launched = this.panes.get(ptyId);
+            if (launched) launched._claudeAccount = account;
         } else if (profile.id === 'ollama') {
             const resolved = await this._resolveOllamaCommand(opts.ollamaModel);
             if (resolved.error) {
@@ -1707,8 +1739,46 @@ class TerminalController {
     // Se renderizan indentados bajo el ítem "Claude" del menú, con el mismo
     // patrón que los modelos de Ollama. La lista y el default son editables en
     // Ajustes; se re-renderiza en cada apertura, así los cambios se reflejan ya.
+    // Cuenta con la que se lanza Claude. opts.configDir (reanudar) manda; si no,
+    // la elegida en el menú; si no, la de Ajustes; si no, la primera.
+    async _resolveClaudeAccount(opts = {}) {
+        const accounts = parseClaudeAccounts(await loadSetting('claude_accounts'));
+        const showLabel = accounts.length > 1;
+        if (opts.configDir) {
+            const hit = accounts.find(a => sameClaudeDir(a.dir, opts.configDir));
+            return { ...(hit || { label: opts.configDir.split('/').pop(), dir: opts.configDir }), showLabel };
+        }
+        const wanted = opts.account || this._claudeAccount || await loadSetting('claude_default_account');
+        const acct = accounts.find(a => a.label === wanted) || accounts[0] || { label: 'Claude', dir: '~/.claude' };
+        return { ...acct, showLabel };
+    }
+
     async renderClaudeModelItems(containerEl, onSelect) {
         containerEl.innerHTML = '';
+
+        // Cuenta (sticky): cada clic pasa a la siguiente. Afecta a los Claude
+        // que se lancen después, también desde el botón principal.
+        const accounts = parseClaudeAccounts(await loadSetting('claude_accounts'));
+        if (accounts.length > 1) {
+            if (!this._claudeAccount || !accounts.some(a => a.label === this._claudeAccount)) {
+                const def = await loadSetting('claude_default_account');
+                this._claudeAccount = (accounts.find(a => a.label === def) || accounts[0]).label;
+            }
+            const acctBtn = document.createElement('button');
+            acctBtn.className = 'pane-profile-item pane-profile-subitem';
+            const paintAcct = () => {
+                acctBtn.innerHTML = `<span class="pane-profile-icon">◐</span>Cuenta  [${escapeHtml(this._claudeAccount)}]`;
+            };
+            paintAcct();
+            acctBtn.title = 'Cuenta de Claude con la que se lanzan las sesiones nuevas (clic para cambiar)';
+            acctBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const i = accounts.findIndex(a => a.label === this._claudeAccount);
+                this._claudeAccount = accounts[(i + 1) % accounts.length].label;
+                paintAcct();
+            });
+            containerEl.appendChild(acctBtn);
+        }
 
         // Toggle sticky: decide si el próximo Claude arranca con --remote-control.
         // El estado vive en el controlador y lo lee _execProfile al lanzar.
@@ -1823,7 +1893,7 @@ class TerminalController {
             this._setActiveLeaf(pane.tabId, ptyRes.id);
             this.panes.get(ptyRes.id)?.term.focus();
             // Ejecutar comando del perfil si se especificó
-            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId });
+            if (options.profile) this._execProfile(ptyRes.id, options.profile, { ollamaModel: options.ollamaModel, model: options.model, resume: options.resumeId, configDir: options.configDir });
         }));
     }
 
@@ -2445,7 +2515,10 @@ class TerminalController {
                 break;
             case 'StopFailure':
                 this._setAgentState(pane, 'error', p.at);
-                a.detail = p.error || 'La petición a la API falló';
+                // Errores conocidos, en lenguaje claro y con qué hacer.
+                a.detail = /authentication|login|unauthori[sz]ed|401/i.test(p.error || '')
+                    ? 'Sesión de Claude caducada o sin iniciar: escribe /login en este terminal'
+                    : (p.error || 'La petición a la API falló');
                 this._notifyAgent(pane, 'error', a.detail);
                 break;
             default:

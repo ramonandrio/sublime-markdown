@@ -36,7 +36,7 @@
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 
     <!-- Estilos propios -->
-    <link rel="stylesheet" href="styles.css?v=6">
+    <link rel="stylesheet" href="styles.css?v=7">
 </head>
 
 <body>
@@ -429,11 +429,11 @@
     <script src="node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
 
     <!-- Módulos de la aplicación -->
-    <script src="chat.js?v=20"></script>
+    <script src="chat.js?v=22"></script>
     <script src="node_modules/diff/dist/diff.min.js"></script>
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=19"></script>
     <script src="review.js?v=1"></script>
-    <script src="history.js?v=1"></script>
+    <script src="history.js?v=2"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -532,6 +532,26 @@
                         <div class="settings-actions">
                             <button id="claudeModelsSave" class="settings-btn-primary">Guardar</button>
                             <span id="claudeModelsStatus" class="settings-status"></span>
+                        </div>
+                    </div>
+                    <div class="settings-field">
+                        <label for="claudeAccountsInput">Cuentas</label>
+                        <p class="settings-hint">
+                            Separadas por comas, formato <code>Etiqueta=carpeta</code>. Cada carpeta guarda su propio
+                            login de Claude (<code>CLAUDE_CONFIG_DIR</code>); la primera vez, entra en una sesión de esa
+                            cuenta y haz <code>/login</code>. <code>~/.claude</code> es la de siempre. La cuenta se elige
+                            en el menú de Claude (click derecho en <code>+</code>) y al reanudar se usa la de la conversación.
+                        </p>
+                        <div class="settings-input-row">
+                            <input id="claudeAccountsInput" type="text" placeholder="Trabajo=~/.claude, Personal=~/.claude-perso" autocomplete="off" spellcheck="false" />
+                        </div>
+                        <label for="claudeDefaultAccountSelect" style="margin-top:10px;">Cuenta por defecto</label>
+                        <div class="settings-input-row">
+                            <select id="claudeDefaultAccountSelect"></select>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="claudeAccountsSave" class="settings-btn-primary">Guardar</button>
+                            <span id="claudeAccountsStatus" class="settings-status"></span>
                         </div>
                     </div>
                 </section>
