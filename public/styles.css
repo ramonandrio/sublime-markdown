@@ -3198,3 +3198,154 @@ mark.find-highlight.find-current {
     color: var(--acct);
     font-weight: 600;
 }
+
+/* ── Evitar reposo (caffeinate.js) ─────────────────────────────────────────── */
+.caffeinate-btn.caffeinate-on {
+    color: #9a6700;
+    background: #fff8c5;
+    border-radius: var(--radius-sm);
+}
+
+.caffeinate-btn.caffeinate-armed {
+    color: #9a6700;
+}
+
+.caff-pop {
+    position: fixed;
+    z-index: 10001;
+    width: 330px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-dark);
+    box-shadow: 0 12px 36px rgba(31, 35, 40, 0.2);
+    font-family: var(--font-ui);
+    font-size: 13px;
+}
+
+.caff-pop[hidden] {
+    display: none;
+}
+
+.caff-title {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.caff-status {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
+.caff-status.on {
+    color: #9a6700;
+    font-weight: 500;
+}
+
+.caff-pop fieldset {
+    border: none;
+    margin: 0 0 10px;
+    padding: 0;
+}
+
+.caff-pop legend {
+    margin-bottom: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.caff-opt {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 3px 0;
+    cursor: pointer;
+}
+
+.caff-opt input {
+    margin-top: 3px;
+}
+
+.caff-opt small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.caff-durations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.caff-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.caff-chip span {
+    display: inline-block;
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.caff-chip input:checked + span {
+    border-color: var(--text-accent);
+    background: rgba(9, 105, 218, 0.08);
+    color: var(--text-accent);
+    font-weight: 500;
+}
+
+.caff-chip input:focus-visible + span {
+    outline: 2px solid var(--text-accent);
+    outline-offset: 1px;
+}
+
+.caff-custom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.caff-custom[hidden] {
+    display: none;
+}
+
+.caff-custom input {
+    width: 70px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.caff-note {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.caff-note[hidden] {
+    display: none;
+}
+
+.caff-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.caff-actions [hidden] {
+    display: none;
+}

@@ -36,7 +36,7 @@
     <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 
     <!-- Estilos propios -->
-    <link rel="stylesheet" href="styles.css?v=9">
+    <link rel="stylesheet" href="styles.css?v=10">
 </head>
 
 <body>
@@ -103,6 +103,9 @@
                     </button>
                     <button id="historySearchBtn" class="action-btn" title="Buscar en el historial (⌘K)" aria-label="Buscar en el historial">
                         <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v3l2 1.5"/></svg>
+                    </button>
+                    <button id="caffeinateBtn" class="action-btn caffeinate-btn" title="Evitar reposo" aria-label="Evitar que el Mac entre en reposo" aria-pressed="false">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M17 8h1a4 4 0 0 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><path d="M6 2v2M10 2v2M14 2v2"/></svg>
                     </button>
                     <button id="settingsBtn" class="action-btn" title="Ajustes" aria-label="Ajustes">
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -434,6 +437,7 @@
     <script src="app.js?v=19"></script>
     <script src="review.js?v=1"></script>
     <script src="history.js?v=2"></script>
+    <script src="caffeinate.js?v=2"></script>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="settings-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">

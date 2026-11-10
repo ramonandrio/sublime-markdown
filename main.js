@@ -1028,6 +1028,60 @@ ipcMain.handle('history-open', async (event, kind, id, configDir) => {
     return { title: doc.title, cwd: doc.cwd, sessionId: doc.id, configDir: doc.configDir, markdown: md };
 });
 
+// === CAFFEINATE: evitar que el Mac entre en reposo ===
+// Un único proceso `caffeinate` gestionado por la app. Lleva `-w <pid de
+// CompassAI>`: si la app se cierra o se cuelga, el Mac vuelve a poder dormir.
+const CAFFEINATE_FLAGS = new Set(['i', 'd', 'm', 's']); // -u no: sin -t solo dura 5 s
+let caffeinateProc = null;
+let caffeinateInfo = null; // { flags, minutes, mode, startedAt, until }
+
+function caffeinateStatus() {
+    return caffeinateProc ? { active: true, ...caffeinateInfo } : { active: false };
+}
+
+function broadcastCaffeinate() {
+    const status = caffeinateStatus();
+    for (const { window: w } of windowData.values()) {
+        if (w && !w.isDestroyed()) w.webContents.send('caffeinate-changed', status);
+    }
+}
+
+function stopCaffeinate() {
+    const proc = caffeinateProc;
+    caffeinateProc = null;
+    caffeinateInfo = null;
+    if (proc) { try { proc.kill(); } catch (_) {} }
+}
+
+ipcMain.handle('caffeinate-start', (event, { flags = ['i'], minutes = null, mode = 'manual' } = {}) => {
+    if (process.platform !== 'darwin') return { active: false, error: 'Solo disponible en macOS' };
+    const f = [...new Set((Array.isArray(flags) ? flags : []).filter(x => CAFFEINATE_FLAGS.has(x)))];
+    if (!f.length) f.push('i');
+    const mins = Number(minutes) > 0 ? Math.min(Math.round(Number(minutes)), 24 * 60) : null;
+    stopCaffeinate();
+    const args = ['-' + f.join(''), '-w', String(process.pid)];
+    if (mins) args.push('-t', String(mins * 60));
+    try {
+        const proc = require('child_process').spawn('/usr/bin/caffeinate', args, { stdio: 'ignore' });
+        proc.on('exit', () => {
+            if (caffeinateProc === proc) { caffeinateProc = null; caffeinateInfo = null; broadcastCaffeinate(); }
+        });
+        proc.on('error', () => {
+            if (caffeinateProc === proc) { caffeinateProc = null; caffeinateInfo = null; broadcastCaffeinate(); }
+        });
+        caffeinateProc = proc;
+        caffeinateInfo = { flags: f, minutes: mins, mode: mode === 'auto' ? 'auto' : 'manual',
+                           startedAt: Date.now(), until: mins ? Date.now() + mins * 60_000 : null };
+    } catch (err) {
+        return { active: false, error: err.message };
+    }
+    broadcastCaffeinate();
+    return caffeinateStatus();
+});
+
+ipcMain.handle('caffeinate-stop', () => { stopCaffeinate(); broadcastCaffeinate(); return caffeinateStatus(); });
+ipcMain.handle('caffeinate-status', () => caffeinateStatus());
+
 app.whenReady().then(async () => {
     setupMenu();
     setupAgentStatus();
@@ -1079,6 +1133,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+    stopCaffeinate();
     try {
         const terminalManager = require('./terminal-manager');
         terminalManager.killAll();

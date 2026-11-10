@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('api', {
     // Historial: búsqueda en conversaciones de Claude y logs de terminal
     historySearch: (query, opts)     => ipcRenderer.invoke('history-search', query, opts),
     historyOpen:   (kind, id, cfg)   => ipcRenderer.invoke('history-open', kind, id, cfg),
+    // Evitar que el Mac duerma (caffeinate gestionado por main)
+    caffeinateStart:  (opts) => ipcRenderer.invoke('caffeinate-start', opts),
+    caffeinateStop:   ()     => ipcRenderer.invoke('caffeinate-stop'),
+    caffeinateStatus: ()     => ipcRenderer.invoke('caffeinate-status'),
     terminalNotify: (payload)         => ipcRenderer.send('terminal-notify', payload),
     setWindowTitle: (payload)         => ipcRenderer.send('set-window-title', payload),
 
@@ -58,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
     onFocusPane:      (cb) => ipcRenderer.on('focus-pane',      (_event, payload) => cb(payload)),
     onAgentStatus:    (cb) => ipcRenderer.on('agent-status',    (_event, payload) => cb(payload)),
     onReviewsChanged: (cb) => ipcRenderer.on('reviews-changed', (_event, list) => cb(list)),
+    onCaffeinateChanged: (cb) => ipcRenderer.on('caffeinate-changed', (_event, st) => cb(st)),
 
     // ── Helpers no-IPC ───────────────────────────────────────────────────────
     // webUtils.getPathForFile(file) — devuelve la ruta absoluta de un File
